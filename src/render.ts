@@ -2,7 +2,7 @@
 import { CUT } from "./charte";
 import type { Doc, Master, Page, Paint, Paragraph, SceneNode, Stroke, TextNode } from "./model";
 import { masterAreas, sectionRects } from "./model";
-import { fmt, isIdentity, shapeToD, subpathsToD, svgMatrix } from "./geom";
+import { arrowHeadsD, fmt, isIdentity, shapeToD, subpathsToD, svgMatrix, trimForArrows } from "./geom";
 import { layoutText } from "./textlayout";
 import { boundColor, computeNumbering, prepareText, varsFor } from "./templates";
 import { assetUrl } from "./assets";
@@ -80,6 +80,7 @@ function text(c: Ctx, n: TextNode, editable: boolean): string {
       const st = [`font-family:'${r.font}'`, `font-size:${fmt(r.size)}px`, `font-weight:${r.weight}`, `fill:${r.color}`];
       if (r.italic) st.push("font-style:italic");
       if (r.underline) st.push("text-decoration:underline");
+      if (r.tracking) st.push(`letter-spacing:${fmt(r.tracking * r.size)}px`);
       if (r.opacity < 1) st.push(`fill-opacity:${fmt(r.opacity)}`);
       return `<tspan x="${fmt(s.x)}" style="${st.join(";")}">${esc(s.text)}</tspan>`;
     }).join("");
@@ -100,8 +101,15 @@ function renderNode(c: Ctx, n: SceneNode, editable = true): string {
   if (iso && !iso.has(n.id)) return "";
   if (!n.visible && !c.opts.showHidden && !(iso && n.type === "group" && n.isLayer)) return "";
   switch (n.type) {
-    case "shape":
     case "path":
+      if (n.stroke.width > 0 && (n.stroke.arrowStart || n.stroke.arrowEnd)) {
+        // pointes de flèche remplies de la couleur du trait ; le trait s'arrête à l'intérieur
+        const s = paint(c, n.stroke.paint, boundColor(n.bind?.stroke, c.vars));
+        const head = s.v === "none" ? "" : `<path d="${arrowHeadsD(n.subpaths, n.stroke)}" style="fill:${s.v};${s.o < 1 ? `fill-opacity:${fmt(s.o)};` : ""}stroke:none"/>`;
+        return `<g ${attrs(c, n, editable)}><path d="${subpathsToD(trimForArrows(n.subpaths, n.stroke))}" style="${styleOf(c, n)}"/>${head}</g>`;
+      }
+      return `<path d="${geometry(n)}" style="${styleOf(c, n)}" ${attrs(c, n, editable)}/>`;
+    case "shape":
       return `<path d="${geometry(n)}" style="${styleOf(c, n)}" ${attrs(c, n, editable)}/>`;
     case "text":
       return text(c, n, editable);

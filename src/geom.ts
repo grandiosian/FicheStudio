@@ -1,4 +1,4 @@
-import type { Mat, ShapeNode, SubPath, Vec } from "./model";
+import type { ArrowHead, Mat, ShapeNode, Stroke, SubPath, Vec } from "./model";
 
 export const fmt = (v: number) => {
   const s = (Math.round(v * 1000) / 1000).toString();
@@ -92,9 +92,12 @@ export function shapeToSubpaths(s: ShapeNode): SubPath[] {
     case "diamond":
       return [{ closed: true, points: [{ x: cx, y }, { x: x1, y: y + s.param * h }, { x: cx, y: y1 }, { x, y: y + s.param * h }] }];
     case "arrow": {
-      const t = (s.param * h) / 2, head = Math.min(h, w / 2), rx = x1 - head;
+      const t = (s.param * h) / 2;
+      // pointe : longueur et décalage de la base au ras du corps (proportionnels à la hauteur, comme Affinity)
+      const head = s.head ? Math.min(w, s.head[0] * h) : Math.min(h, w / 2);
+      const rx = x1 - head, ix = s.head ? Math.min(x1, Math.max(x, x1 - head - s.head[1] * h)) : rx;
       return [{ closed: true, points: [
-        { x, y: cy - t }, { x: rx, y: cy - t }, { x: rx, y }, { x: x1, y: cy }, { x: rx, y: y1 }, { x: rx, y: cy + t }, { x, y: cy + t },
+        { x, y: cy - t }, { x: ix, y: cy - t }, { x: rx, y }, { x: x1, y: cy }, { x: rx, y: y1 }, { x: ix, y: cy + t }, { x, y: cy + t },
       ] }];
     }
     default: {
@@ -124,4 +127,64 @@ export function shapeToD(s: ShapeNode): string {
     return `M${fmt(cx - rx)},${fmt(cy)} A${fmt(rx)},${fmt(ry)} 0 1 0 ${fmt(cx + rx)},${fmt(cy)} A${fmt(rx)},${fmt(ry)} 0 1 0 ${fmt(cx - rx)},${fmt(cy)} Z`;
   }
   return subpathsToD(shapeToSubpaths(s));
+}
+
+// ---------------------------------------------------------------- pointes de flèche
+// Formes d'Affinity (repère unité, pointe en (1 ; 0,5)) ; le trait s'arrête au creux (« ancre »).
+const ARROW: Record<ArrowHead["style"], { pts: [number, number][]; anchor: number; across: number }> = {
+  barbed: { pts: [[0, 0], [1, 0.5], [0, 1], [0.5, 0.5]], anchor: 0.5, across: 1 },
+  triangle: { pts: [[0, 0], [1, 0.5], [0, 1]], anchor: 0.2, across: 1 },
+};
+const ARROW_UNIT = 2.8; // longueur de la pointe en épaisseurs de trait (mesuré dans Affinity)
+
+/** Extrémité d'un chemin ouvert : point final et direction sortante (unitaire). */
+function pathEnd(sp: SubPath, atEnd: boolean): { p: Vec; d: Vec } | null {
+  const pts = sp.points;
+  if (sp.closed || pts.length < 2) return null;
+  const a = atEnd ? pts[pts.length - 1] : pts[0];
+  const b = atEnd ? pts[pts.length - 2] : pts[1];
+  // tangente : poignée de l'extrémité, sinon celle du point voisin, sinon le point voisin lui-même
+  const near = atEnd ? a.in : a.out, far = atEnd ? b.out : b.in;
+  const ok = (v?: Vec) => !!v && Math.hypot(v.x - a.x, v.y - a.y) > 1e-6;
+  const q = ok(near) ? near! : ok(far) ? far! : b;
+  const len = Math.hypot(a.x - q.x, a.y - q.y);
+  return len > 1e-9 ? { p: { x: a.x, y: a.y }, d: { x: (a.x - q.x) / len, y: (a.y - q.y) / len } } : null;
+}
+
+/** Chemins des pointes de flèche (à remplir avec la couleur du trait). */
+export function arrowHeadsD(sps: SubPath[], s: Stroke): string {
+  const out: string[] = [];
+  for (const sp of sps) {
+    for (const [ah, atEnd] of [[s.arrowStart, false], [s.arrowEnd, true]] as const) {
+      if (!ah) continue;
+      const e = pathEnd(sp, atEnd);
+      if (!e) continue;
+      const f = ARROW[ah.style], L = ARROW_UNIT * s.width * ah.sx, W = ARROW_UNIT * s.width * ah.sy * f.across;
+      const nrm = { x: -e.d.y, y: e.d.x };
+      const pts = f.pts.map(([u, v]) => ({ x: e.p.x + e.d.x * (u - 1) * L + nrm.x * (v - 0.5) * W, y: e.p.y + e.d.y * (u - 1) * L + nrm.y * (v - 0.5) * W }));
+      out.push(`M${pts.map((p) => `${fmt(p.x)},${fmt(p.y)}`).join(" L")} Z`);
+    }
+  }
+  return out.join(" ");
+}
+
+/** Chemin raccourci sous les pointes : le trait s'arrête dans la flèche au lieu de dépasser la pointe. */
+export function trimForArrows(sps: SubPath[], s: Stroke): SubPath[] {
+  if (!s.arrowStart && !s.arrowEnd) return sps;
+  return sps.map((sp) => {
+    if (sp.closed || sp.points.length < 2) return sp;
+    const pts = sp.points.map((p) => ({ ...p, in: p.in && { ...p.in }, out: p.out && { ...p.out } }));
+    for (const [ah, atEnd] of [[s.arrowStart, false], [s.arrowEnd, true]] as const) {
+      if (!ah) continue;
+      const e = pathEnd(sp, atEnd);
+      if (!e) continue;
+      const k = (1 - ARROW[ah.style].anchor) * ARROW_UNIT * s.width * ah.sx;
+      const a = pts[atEnd ? pts.length - 1 : 0];
+      const dx = -e.d.x * k, dy = -e.d.y * k;
+      a.x += dx; a.y += dy;
+      const h = atEnd ? a.in : a.out;
+      if (h) { h.x += dx; h.y += dy; }
+    }
+    return { ...sp, points: pts };
+  });
 }

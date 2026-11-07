@@ -5,7 +5,7 @@ import {
   PDFDocument, PDFFont, PDFName, PDFPage, StandardFonts,
   appendBezierCurve, beginText, clip, closePath, concatTransformationMatrix, drawObject, endPath, endText,
   fill, fillAndStroke, lineTo, moveTo, popGraphicsState, pushGraphicsState, setDashPattern, setFillingRgbColor,
-  setFontAndSize, setGraphicsState, setLineCap, setLineJoin, setLineWidth, setStrokingRgbColor, setTextMatrix,
+  setCharacterSpacing, setFontAndSize, setGraphicsState, setLineCap, setLineJoin, setLineWidth, setStrokingRgbColor, setTextMatrix,
   showText, stroke, LineCapStyle, LineJoinStyle, type PDFOperator,
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
@@ -267,10 +267,11 @@ class Painter {
         const pieces: [string, number][] = [];
         if (l.wordSpacing) {
           let x = s.x;
+          const tk = (str: string) => (r.tracking ? r.tracking * r.size * Array.from(str).length : 0);
           for (const w of s.text.split(/( )/)) {
-            if (w === " ") { x += ctx.measureText(" ").width + l.wordSpacing; continue; }
+            if (w === " ") { x += ctx.measureText(" ").width + tk(" ") + l.wordSpacing; continue; }
             if (w) pieces.push([w, x]);
-            x += ctx.measureText(w).width;
+            x += ctx.measureText(w).width + tk(w);
           }
         } else pieces.push([s.text, s.x]);
         for (const [str, x] of pieces) {
@@ -278,7 +279,9 @@ class Painter {
           // largeur calée sur la composition : la mise en page reste exacte même si la police est remplacée
           const want = ctx.measureText(str).width, got = f.widthOfTextAtSize(txt, r.size);
           const hs = got > 0 && want > 0 ? Math.max(0.5, Math.min(1.5, want / got)) : 1;
-          this.ops.push(beginText(), setFontAndSize(key, r.size), setTextMatrix(hs, 0, 0, -1, x, l.y), showText(f.encodeText(txt)), endText());
+          // interlettrage : espacement PDF (Tc), compensé de l'échelle horizontale du texte
+          const tc = r.tracking ? setCharacterSpacing((r.tracking * r.size) / hs) : null;
+          this.ops.push(beginText(), setFontAndSize(key, r.size), ...(tc ? [tc] : []), setTextMatrix(hs, 0, 0, -1, x, l.y), showText(f.encodeText(txt)), endText());
         }
         if (r.underline) {
           const w = s.width;

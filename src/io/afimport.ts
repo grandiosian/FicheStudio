@@ -2,7 +2,7 @@
 import { AfArchive, KsStream, type KsObj, type KsValue } from "./afread";
 import {
   IDENTITY, NONE, newDoc, newLayer, uid,
-  type Anchor, type Doc, type GroupNode, type Mat, type Page, type Paint, type Paragraph, type Run,
+  type Anchor, type ArrowHead, type Doc, type GroupNode, type Mat, type Page, type Paint, type Paragraph, type Run,
   type SceneNode, type ShapeKind, type Stroke, type SubPath, type TextNode,
 } from "../model";
 import { apply, inv, mul, scaleOf } from "../geom";
@@ -91,17 +91,29 @@ class Importer {
     const ls = this.res(ld?.LDeL);
     let width = (ls?.Wght as number) ?? 0;
     if (!ld?.LDSc) width /= scaleOf(cum); // épaisseur absolue sauf « mettre à l'échelle avec l'objet »
-    // Data = [limite d'onglet, extrémité, jointure, type, ?]
-    const data = (ls?.Data as number[] | undefined) ?? [4, 0, 0, 1, 0];
-    const [, cap, join, type] = data;
+    // Data = [limite d'onglet, [extrémité, jointure, type, ?]] (ancienne forme : liste à plat)
+    // extrémité 0 plate, 1 carrée, 2 ronde ; jointure 0-1 onglet, 2 ronde, 3 biseau ; type 0 aucun, 1 plein, 2 tirets, 3 texturé
+    const raw = (ls?.Data as KsValue[] | undefined) ?? [4, [0, 0, 1, 0]];
+    const flat = (Array.isArray(raw[1]) ? [raw[0], ...(raw[1] as number[])] : raw) as (number | undefined)[];
+    const [, cap, join, type = 1] = flat;
     const paint = lfills.length ? this.paint(lfills[0]) : NONE;
+    // pointes de flèche (LSAr.Styl : 0-2 triangles, 4 barbelée ; les autres styles en triangle)
+    const head = (v: KsValue | undefined): ArrowHead | null => {
+      const a = this.res(v ?? null);
+      const st = a?.Styl as number | undefined;
+      if (!a || st === undefined) return null;
+      const tall = st === 1 ? 1.75 : st === 2 ? 0.6 : 1;
+      return { style: st === 4 ? "barbed" : "triangle", sx: (a.SclX as number) || 1, sy: ((a.SclY as number) || 1) * tall };
+    };
     if (type === 3) this.note("contour texturé rendu en trait plein");
     return {
       paint: type === 0 ? NONE : paint,
       width: type === 0 ? 0 : width,
       dash: type === 2 && Array.isArray(ls?.Patn) ? (ls!.Patn as number[]) : null,
       cap: cap === 1 ? "square" : cap === 2 ? "round" : "butt",
-      join: join === 1 ? "bevel" : join === 2 ? "round" : "miter",
+      join: join === 3 ? "bevel" : join === 2 ? "round" : "miter",
+      ...(head(ld?.LFAh) ? { arrowStart: head(ld?.LFAh)! } : {}),
+      ...(head(ld?.LBAh) ? { arrowEnd: head(ld?.LBAh)! } : {}),
     };
   }
 
@@ -133,7 +145,7 @@ class Importer {
     const kids = ((n.Chld as KsValue[] | undefined) ?? []);
     let out: SceneNode | null = null;
     if (cls === "PCrv" || cls === "ShpN") {
-      out = cls === "PCrv" ? this.curve(n, cum) : this.shape(n, parentCum);
+      out = cls === "PCrv" ? this.curve(n, parentCum) : this.shape(n, parentCum);
       if (out && kids.length) {
         // un enfant d'une forme est découpé par elle
         const inner = kids.map((k) => this.node(k, cum)).filter(Boolean) as SceneNode[];
@@ -166,7 +178,7 @@ class Importer {
     // masque attaché (« AdCh ») : une forme rangée dans l'image ou le groupe qui le découpe
     const clip = ((n.AdCh as KsValue[] | undefined) ?? []).map((k) => this.res(k)).find((m) => m && (m.$class === "ShpN" || m.$class === "PCrv"));
     if (out && clip) {
-      const mask = clip.$class === "ShpN" ? this.shape(clip, cum) : this.curve(clip, mul(cum, mat(clip.Xfrm)));
+      const mask = clip.$class === "ShpN" ? this.shape(clip, cum) : this.curve(clip, cum);
       // masque invisible : il découpe seulement (la forme d'un « contenu dans une forme » reste, elle, dessinée)
       mask.visible = false; mask.opacity = 1;
       const inner = { ...out, transform: [...IDENTITY] as Mat, visible: true, opacity: 1 } as SceneNode;
@@ -176,7 +188,11 @@ class Importer {
     return out;
   }
 
-  curve(n: KsObj, cum: Mat): SceneNode {
+  /** Courbe : sa transformation est appliquée aux points, comme Affinity garde un trait d'épaisseur
+   *  uniforme quand la courbe est étirée (un trait court écrasé ne doit pas devenir un pavé). */
+  curve(n: KsObj, parentCum: Mat): SceneNode {
+    const own = mat(n.Xfrm);
+    const P = (x: number, y: number) => apply(own, { x, y });
     const data = (this.res(n.Crvs)?.Data as KsValue[] | undefined) ?? [];
     const subpaths: SubPath[] = [];
     const count = (data[1] as number) ?? 0;
@@ -192,9 +208,9 @@ class Importer {
         const a = anchors[anchors.length - 1];
         if (!a) return;
         const b = next ?? anchors[0];
-        if (ctrl.length >= 2) { a.out = { x: ctrl[0][0], y: ctrl[0][1] }; b.in = { x: ctrl[1][0], y: ctrl[1][1] }; }
+        if (ctrl.length >= 2) { a.out = P(ctrl[0][0], ctrl[0][1]); b.in = P(ctrl[1][0], ctrl[1][1]); }
         else if (ctrl.length === 1) {
-          const q = { x: ctrl[0][0], y: ctrl[0][1] };
+          const q = P(ctrl[0][0], ctrl[0][1]);
           a.out = { x: a.x + (2 / 3) * (q.x - a.x), y: a.y + (2 / 3) * (q.y - a.y) };
           b.in = { x: b.x + (2 / 3) * (q.x - b.x), y: b.y + (2 / 3) * (q.y - b.y) };
         }
@@ -202,14 +218,14 @@ class Importer {
       };
       for (const p of seq) {
         if (p[2] === 0) { ctrl.push(p); continue; }
-        const a: Anchor = { x: p[0], y: p[1], smooth: p[2] === 2 || p[2] === 3 };
+        const a: Anchor = { ...P(p[0], p[1]), smooth: p[2] === 2 || p[2] === 3 };
         if (anchors.length) close(a);
         anchors.push(a);
       }
       if (closed) close(null);
       subpaths.push({ closed, points: anchors });
     }
-    return { ...this.base(n, "Courbe"), type: "path", subpaths, fill: this.fill(n), stroke: this.stroke(n, cum) };
+    return { ...this.base(n, "Courbe"), transform: [...IDENTITY] as Mat, type: "path", subpaths, fill: this.fill(n), stroke: this.stroke(n, parentCum) };
   }
 
   shape(n: KsObj, parentCum: Mat): SceneNode {
@@ -227,7 +243,7 @@ class Importer {
       const p = apply(rest, { x: b[0], y: b[1] }), q = apply(rest, { x: b[2], y: b[3] });
       box = { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y), w: Math.abs(q.x - p.x), h: Math.abs(q.y - p.y) };
       transform = rot;
-      rbase = localMin * Math.min(Math.abs(rest[0]), Math.abs(rest[3]));
+      rbase = Math.min(box.w, box.h); // rayon relatif au petit côté de la boîte étirée
     }
     const kinds: Record<string, ShapeKind> = { ShNR: "rect", ShpE: "ellipse", ShpT: "triangle", ShpD: "diamond", ShDA: "arrow" };
     const kind = kinds[shp.$class ?? ""] ?? "rect";
@@ -238,10 +254,13 @@ class Importer {
     const r0 = ctype === 0 || ctype === 1 ? (nums(shp.ShCR)?.[0] ?? 0) * rbase : 0;
     const cr: [number, number, number, number] = [r0, r0, r0, r0];
     const param = kind === "arrow" ? ((shp.Thck as number) ?? 0.4) : ((shp["Pos "] as number) ?? 0.5);
+    // flèche (ShDA) : pointe droite RPr1 = longueur, RPr2 = décalage de sa base (× hauteur)
+    const head: [number, number] | null = kind === "arrow" ? [(shp.RPr1 as number) ?? 0.5, (shp.RPr2 as number) ?? 0] : null;
+    if (kind === "arrow" && (shp.LSty as number) > 0) this.note("flèche double importée avec une seule pointe");
     const cum = mul(parentCum, transform);
     return {
       ...this.base(n, "Forme"), transform, type: "shape", kind, ...box,
-      radius: kind === "rect" ? cr : [0, 0, 0, 0], ...(kind === "rect" && ctype === 1 ? { corner: "chamfer" as const } : {}), param, fill: this.fill(n), stroke: this.stroke(n, cum),
+      radius: kind === "rect" ? cr : [0, 0, 0, 0], ...(kind === "rect" && ctype === 1 ? { corner: "chamfer" as const } : {}), ...(head ? { head } : {}), param, fill: this.fill(n), stroke: this.stroke(n, cum),
     };
   }
 
@@ -268,9 +287,13 @@ class Importer {
       const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
       frame = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
       // cadre en colonnes : le texte se coupe à la largeur de la 1re colonne, pas du cadre entier
-      const cols = nums(this.res(n.TxtH)?.ColW) ?? [], fw = fb[2] - fb[0];
-      // (une 2e colonne de largeur nulle n'est pas une vraie colonne : le texte prend alors tout le cadre)
-      if (cols.filter((c) => c > 1).length > 1 && fw > 0 && cols[0] < fw - 1) frame.w *= cols[0] / fw;
+      // ColW / GutW peuvent dater d'avant un redimensionnement : on répartit la largeur actuelle
+      // (moins les gouttières) au prorata. Une 2e colonne de largeur nulle garde sa gouttière.
+      // (la gouttière est en unités du texte : elle suit l'échelle des glyphes du cadre)
+      const tsF = this.groupTextScale * (n.FTxS ? scaleOf(mat(n.FTxS)) : 1);
+      const th = this.res(n.TxtH), cols = nums(th?.ColW) ?? [], gut = (nums(th?.GutW)?.[0] ?? 0) * tsF;
+      const sum = cols.reduce((a, c) => a + c, 0);
+      if (cols.length > 1 && sum > 0) frame.w = Math.max(1, (frame.w - gut * (cols.length - 1)) * (cols[0] / sum));
     } else origin = apply(toRot, { x: 0, y: 0 });
     // texte artistique : les glyphes suivent l'échelle réelle (groupes × son propre Xfrm) ;
     // texte encadré : corps absolu, corrigé seulement par les FTxS des groupes
@@ -311,13 +334,22 @@ class Importer {
         if (bullet) runs.unshift({ ...runs[0], text: bullet.includes("\t") ? bullet : `${bullet}\t` });
         // PAtt.Doub = [interligne relatif, interligne absolu, retrait gauche, retrait droit, retrait 1re ligne, espace avant, espace après, pas de tabulation…]
         const d = (att?.Doub as number[] | undefined) ?? [];
+        const lead = ((att?.Ints as number[] | undefined) ?? [])[1] ?? 0;
+        // taquets explicites (TabS.Stop[].Posn)
+        const tabS = ((att?.Objs as KsValue[] | undefined) ?? []).map((o) => this.res(o)).find((o) => o?.$class === "TabS");
+        const tabs = ((tabS?.Stop as KsValue[] | undefined) ?? []).map((t) => this.res(t)?.Posn as number | undefined)
+          .filter((v): v is number => typeof v === "number" && v > 0).map((v) => v * ts).sort((a, b) => a - b);
         const px = (i: number) => (typeof d[i] === "number" ? d[i] * ts : 0);
         paragraphs.push({
           align: (["left", "center", "right", "justify"] as const)[align] ?? "left",
-          lineHeight: d[0] > 0.2 && d[0] < 5 ? d[0] : 1,
-          leftIndent: px(2), rightIndent: px(3), spaceBefore: px(5), spaceAfter: px(6),
-          firstIndent: bullet && !d[4] ? -(((list?.ITab as number | undefined) ?? d[2] ?? 0) * ts) : px(4),
+          lineHeight: d[0] > 0 && d[0] < 10 ? d[0] : 1,
+          // PAtt.Ints[1] : type d'interligne (0 relatif à l'idéal, 1 relatif au corps, 2 exact, 3 au moins)
+          ...(lead === 2 && d[1] > 0 ? { leading: d[1] * ts } : {}),
+          // Affinity : la 1re ligne commence au « retrait de 1re ligne » compté depuis le bord du cadre,
+          // les suivantes au retrait gauche (ici, retrait de 1re ligne relatif au retrait gauche)
+          leftIndent: px(2), rightIndent: px(3), firstIndent: px(4) - px(2), spaceBefore: px(5), spaceAfter: px(6),
           tabStop: d[7] > 1 ? d[7] * ts : 50, level: 0, runs,
+          ...(tabs.length ? { tabs } : {}),
         });
         pos += pc.length + 1;
       }
@@ -325,7 +357,11 @@ class Importer {
     }
     // TxtH.Algn : alignement vertical du cadre (0 haut, 1 milieu, 2 bas)
     const va = (this.res(n.TxtH)?.Algn as number | undefined) ?? 0;
+    // texte artistique : ni retour à la ligne automatique, ni retraits, ni espaces avant/après (seul l'interligne compte)
+    if (n.$class === "TxtA") for (const p of paragraphs) { p.leftIndent = 0; p.firstIndent = 0; p.rightIndent = 0; p.spaceBefore = 0; p.spaceAfter = 0; }
     const t: TextNode = {
+      ...(n.$class === "TxtA" && frame ? { noWrap: true } : {}),
+      ...(n.$class !== "TxtA" && frame && this.res(n.Flow)?.HOvr ? { hideOverflow: true } : {}),
       ...(frame && va === 1 ? { valign: "middle" as const } : frame && va === 2 ? { valign: "bottom" as const } : {}),
       ...this.base(n, "Texte"),
       transform: mul(inv(parentCum), rot),
@@ -353,6 +389,11 @@ class Importer {
       underline: (((g?.Ints as number[] | undefined) ?? [0])[0] ?? 0) > 0, // GAtt.Ints[0] : soulignement
       color: col.color,
       opacity: col.opacity,
+      // GAtt.Doub[4] : interlettrage (fraction du corps)
+      ...(Math.abs(((g?.Doub as number[] | undefined) ?? [])[4] ?? 0) > 1e-4 ? { tracking: (g!.Doub as number[])[4] } : {}),
+      // GAtt.Ints[4] = 1 : interligne des caractères (« au moins », Doub[13]) qui remplace celui du paragraphe
+      ...(((g?.Ints as number[] | undefined) ?? [])[4] === 1 && ((g?.Doub as number[] | undefined) ?? [])[13] > 0
+        ? { leading: (g!.Doub as number[])[13] * scale } : {}),
     };
   }
 
@@ -388,7 +429,8 @@ class Importer {
 }
 
 const sameStyle = (a: Run, b: Run) =>
-  a.font === b.font && a.size === b.size && a.weight === b.weight && a.italic === b.italic && a.color === b.color && a.opacity === b.opacity;
+  a.font === b.font && a.size === b.size && a.weight === b.weight && a.italic === b.italic && a.color === b.color && a.opacity === b.opacity
+  && a.underline === b.underline && a.leading === b.leading && a.tracking === b.tracking;
 
 function hsl(h: number, s: number, l: number): [number, number, number] {
   if (!s) return [l, l, l];

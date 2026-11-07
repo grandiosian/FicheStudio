@@ -18,7 +18,11 @@ export interface Stroke {
   dash: number[] | null; // en multiples de l'épaisseur, comme Affinity
   cap: "butt" | "round" | "square";
   join: "miter" | "round" | "bevel";
+  arrowStart?: ArrowHead; // pointe de flèche au début / à la fin d'un chemin ouvert
+  arrowEnd?: ArrowHead;
 }
+/** Pointe de flèche (styles Affinity) ; taille proportionnelle à l'épaisseur du trait. */
+export interface ArrowHead { style: "barbed" | "triangle"; sx: number; sy: number }
 
 interface Base {
   id: string;
@@ -59,6 +63,7 @@ export interface ShapeNode extends Base {
   radius: [number, number, number, number]; // px, coins HG HD BD BG (rect)
   corner?: "round" | "chamfer";              // forme des coins (rect) : arrondis par défaut, ou coupés
   param: number;                            // triangle/losange : position du sommet ; flèche : épaisseur
+  head?: [number, number];                  // flèche : longueur de la pointe et décalage de sa base (× hauteur, comme Affinity)
   fill: Paint;
   stroke: Stroke;
   bind?: Binding;
@@ -73,16 +78,20 @@ export interface Run {
   underline: boolean;
   color: string;
   opacity: number;
+  leading?: number;  // interligne imposé par ces caractères (px) : la ligne prend le plus grand
+  tracking?: number; // interlettrage, en fraction du corps (comme Affinity : -0,05 = resserré)
 }
 export interface Paragraph {
   align: "left" | "center" | "right" | "justify";
   lineHeight: number;   // interligne relatif à l'interligne idéal de la police (comme Affinity ; 1 = normal)
+  leading?: number;     // interligne absolu exact (px) : prioritaire sur lineHeight (« Exactement » dans Affinity)
   spaceBefore: number;  // px
   spaceAfter: number;
   leftIndent?: number;  // px
   rightIndent?: number;
   firstIndent?: number; // retrait de 1re ligne (négatif = retrait suspendu, listes à puces)
   tabStop?: number;     // pas des tabulations par défaut
+  tabs?: number[];      // taquets de tabulation explicites (px depuis le bord du cadre), avant le pas par défaut
   level?: 0 | 1 | 2 | 3; // titre numéroté (nomenclature des ateliers)
   runs: Run[];
 }
@@ -91,6 +100,8 @@ export interface TextNode extends Base {
   frame: { x: number; y: number; w: number; h: number } | null; // null = texte artistique (origine = ligne de base)
   paragraphs: Paragraph[];
   valign?: "top" | "middle" | "bottom"; // position verticale du texte dans le cadre (haut par défaut)
+  noWrap?: boolean;   // texte artistique d'Affinity : le cadre place le texte mais ne le coupe pas
+  hideOverflow?: boolean; // lignes qui dépassent le bas du cadre masquées (comme Affinity)
 }
 
 export interface ImageNode extends Base {

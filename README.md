@@ -200,6 +200,11 @@ avec une largeur ajustée pour que la mise en page ne bouge pas.
 - Texte artistique à l'échelle réelle (groupes × sa propre transformation) ; masques attachés aux
   images et groupes ; alignement vertical des cadres (haut / milieu / bas) ; soulignement ; listes à puces
   (puce + retrait suspendu) ; coins des rectangles selon leur type (aucun, arrondi, coupé).
+- Paragraphes : interligne exact ou relatif, interligne propre à certains caractères, retrait de 1re ligne
+  compté depuis le bord du cadre (comme Affinity), taquets de tabulation, interlettrage ; colonnes
+  (largeur et gouttière) ; texte qui déborde du cadre masqué ; texte artistique jamais coupé.
+- Traits : extrémités et jointures, pointes de flèche (triangle, barbelée), épaisseur uniforme même sur une
+  courbe étirée ; flèches (forme) avec longueur et décalage de pointe.
 
 La composition du texte reprend celle d'Affinity (mesures faites dans Affinity 3.3) : capitales
 alignées sur le haut du cadre, interligne idéal de la police × interligne relatif, retraits,

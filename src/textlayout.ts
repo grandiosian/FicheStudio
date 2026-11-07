@@ -29,9 +29,12 @@ export function fontMetrics(r: Pick<Run, "italic" | "weight" | "font">): Metrics
   return m;
 }
 
+const FIT = 1; // px de dépassement toléré avant de couper la ligne
+
 function measure(r: Run, s: string): number {
   ctx.font = cssFont(r);
-  return ctx.measureText(s).width;
+  // l'interlettrage s'ajoute après chaque caractère, espaces compris (comme Affinity)
+  return ctx.measureText(s).width + (r.tracking ? r.tracking * r.size * Array.from(s).length : 0);
 }
 
 export interface LineSpan { run: Run; text: string; x: number; width: number }
@@ -52,7 +55,7 @@ function tokens(p: Paragraph): Token[] {
 export function layoutText(t: TextNode): Line[] {
   const lines: Line[] = [];
   const frame = t.frame;
-  const width = frame ? frame.w : Infinity;
+  const width = frame && !t.noWrap ? frame.w : Infinity;
   let baseline = frame ? frame.y : 0;
   let prevAfter = 0;
   let firstLine = true;
@@ -70,7 +73,9 @@ export function layoutText(t: TextNode): Line[] {
       while (cur.length && !cur[cur.length - 1].text.trim() && cur[cur.length - 1].text !== "\t") cur.pop();
       const runs = cur.length ? cur.map((s) => s.run) : fallback ? [fallback] : [];
       const cap = Math.max(0, ...runs.map((r) => fontMetrics(r).cap * r.size));
-      const lh = Math.max(0, ...runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
+      const base = p.leading ?? Math.max(0, ...runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
+      // interligne propre aux caractères : la ligne prend le plus grand (les autres gardent celui du paragraphe)
+      const lh = runs.some((r) => r.leading) ? Math.max(...runs.map((r) => r.leading ?? base)) : base;
       // comme Affinity : l'espace avant du 1er paragraphe est ignoré en haut du cadre
       if (firstLine) baseline += (frame ? cap : 0);
       else baseline += (paraFirst ? prevAfter + p.spaceBefore : 0) + lh;
@@ -87,7 +92,12 @@ export function layoutText(t: TextNode): Line[] {
       if (tk.kind === "break") { flush(false); continue; }
       if (tk.kind === "tab") {
         // avant le retrait gauche (puce d'un retrait suspendu), la tabulation s'arrête sur le retrait
-        const nx = x < left - 1e-6 ? left : (Math.floor(x / tab + 1e-6) + 1) * tab;
+        // prochain arrêt : retrait gauche (puce d'un retrait suspendu), taquet explicite ou pas par défaut
+        const nx = Math.min(
+          x < left - 1e-6 ? left : Infinity,
+          p.tabs?.find((t) => t > x + 1e-6) ?? Infinity,
+          (Math.floor(x / tab + 1e-6) + 1) * tab,
+        );
         cur.push({ run: tk.run, text: "\t", x, width: nx - x });
         x = nx;
         continue;
@@ -99,13 +109,14 @@ export function layoutText(t: TextNode): Line[] {
         x += w;
       };
       const w = measure(tk.run, tk.text);
-      if (tk.kind === "word" && frame && w > avail - left) {
+      // tolérance d'un pixel : les chasses du navigateur et d'Affinity diffèrent de quelques centièmes
+      if (tk.kind === "word" && frame && w > avail - left + FIT) {
         // mot plus long que la ligne (ex. « ……… » sans espace) : coupé au bord du cadre, comme Affinity
         if (cur.some((s) => s.text.trim())) flush(false);
         let i = 0;
         while (i < tk.text.length) {
           let j = i + 1;
-          while (j < tk.text.length && x + measure(tk.run, tk.text.slice(i, j + 1)) <= avail) j++;
+          while (j < tk.text.length && x + measure(tk.run, tk.text.slice(i, j + 1)) <= avail + FIT) j++;
           const part = tk.text.slice(i, j);
           put(part, measure(tk.run, part));
           i = j;
@@ -113,7 +124,7 @@ export function layoutText(t: TextNode): Line[] {
         }
         continue;
       }
-      if (tk.kind === "word" && x + w > avail && cur.some((s) => s.text.trim())) flush(false);
+      if (tk.kind === "word" && x + w > avail + FIT && cur.some((s) => s.text.trim())) flush(false);
       if (tk.kind === "space" && !cur.length && !paraFirst) continue; // espaces en début de ligne coupée
       put(tk.text, w);
     }
@@ -151,12 +162,17 @@ export function layoutText(t: TextNode): Line[] {
     const dy = free > 0 ? (t.valign === "middle" ? free / 2 : free) : 0;
     if (dy) for (const l of lines) l.y += dy;
   }
+  // texte en trop masqué : les lignes dont la ligne de base passe sous le cadre (la 1re reste toujours)
+  if (frame && t.hideOverflow) {
+    const k = lines.findIndex((l, i) => i > 0 && l.y > frame.y + frame.h + 1);
+    if (k > 0) lines.length = k;
+  }
   return lines;
 }
 
 /** Hauteur occupée par le texte (pour signaler un débordement de cadre). */
 export function textHeight(t: TextNode): number {
-  const ls = layoutText({ ...t, valign: undefined });
+  const ls = layoutText({ ...t, valign: undefined, hideOverflow: false });
   if (!ls.length) return 0;
   const last = ls[ls.length - 1];
   return last.y + last.height * 0.3 - (t.frame ? t.frame.y : 0);

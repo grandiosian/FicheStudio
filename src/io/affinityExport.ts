@@ -16,7 +16,7 @@ interface XStroke { color: Color | null; width: number; dash: number[] | null; c
 type Item =
   | { k: "path"; name: string; sub: { closed: boolean; pts: number[][] }[]; fill: Color | null; stroke: XStroke; opacity: number; hidden: boolean; children?: Item[] }
   | { k: "rect" | "ellipse"; name: string; box: number[]; fill: Color | null; stroke: XStroke; opacity: number; hidden: boolean; children?: Item[] }
-  | { k: "text"; name: string; frame: number[] | null; angle: number; origin: number[]; paras: { align: number; lh: number; li: number; ri: number; fi: number; sb: number; sa: number; tab: number; runs: { t: string; font: string; size: number; weight: number; italic: boolean; color: Color }[] }[]; opacity: number; hidden: boolean }
+  | { k: "text"; name: string; frame: number[] | null; angle: number; origin: number[]; paras: { align: number; lh: number; la: number; li: number; ri: number; fi: number; sb: number; sa: number; tab: number; runs: { t: string; font: string; size: number; weight: number; italic: boolean; color: Color }[] }[]; opacity: number; hidden: boolean }
   | { k: "image"; name: string; w: number; h: number; px: string; m: number[]; opacity: number; hidden: boolean }
   | { k: "group"; name: string; children: Item[]; opacity: number; hidden: boolean; tag?: Color | null };
 
@@ -114,7 +114,8 @@ async function flatten(doc: Doc, n: SceneNode, parent: Mat, cx: Ctx): Promise<It
         k: "text", ...common, frame: frame?.map(r2) ?? null, angle, origin: [r2(o.x), r2(o.y)],
         paras: t.paragraphs.map((p) => ({
           align: { left: 0, center: 1, right: 2, justify: 3 }[p.align],
-          lh: p.lineHeight || 1, li: r2((p.leftIndent ?? 0) * g), ri: r2((p.rightIndent ?? 0) * g), fi: r2((p.firstIndent ?? 0) * g),
+          // retrait de 1re ligne : compté depuis le bord du cadre dans Affinity, depuis le retrait gauche ici
+          lh: p.lineHeight || 1, la: r2((p.leading ?? 0) * g), li: r2((p.leftIndent ?? 0) * g), ri: r2((p.rightIndent ?? 0) * g), fi: r2(((p.leftIndent ?? 0) + (p.firstIndent ?? 0)) * g),
           sb: r2(p.spaceBefore * g), sa: r2(p.spaceAfter * g), tab: r2((p.tabStop || 50) * g),
           runs: p.runs.filter((r) => r.text).map((r) => ({ t: r.text.replace(/\n/g, " "), font: r.font, size: r2(r.size * g), weight: r.weight, italic: r.italic, color: hex(r.color, r.opacity) })),
         })),
@@ -189,7 +190,7 @@ const R = require('affinity:raster');
 const NativeRGBA8 = require('affinity:colours').RGBA8;
 const { StoryBuilder } = require('/storybuilder.js');
 const { Font, FontWeight, FontWidth } = require('/fonts.js');
-const { ParagraphAlignXType } = require('/paragraphatts.js');
+const { ParagraphAlignXType, ParagraphLeadingType } = require('/paragraphatts.js');
 const { DocumentCommand } = require('/commands.js');
 
 const opts = NewDocumentOptions.createDefault();
@@ -211,7 +212,7 @@ function lineOf(s) {
   return LS.LineStyleDescriptor.create(ls);
 }
 const last = (parent) => { const k = [...parent.children]; return k[k.length - 1]; };
-const ALIGN = [ParagraphAlignXType.Left, ParagraphAlignXType.Centre, ParagraphAlignXType.Right, ParagraphAlignXType.Justify];
+const ALIGN = [ParagraphAlignXType.Left, ParagraphAlignXType.Centre, ParagraphAlignXType.Right, ParagraphAlignXType.JustifyLeft];
 const WEIGHTS = { 100: 'Thin', 200: 'ExtraLight', 300: 'Light', 400: 'Normal', 500: 'Medium', 600: 'SemiBold', 700: 'Bold', 800: 'ExtraBold', 900: 'Black' };
 
 function b64(s) {
@@ -269,7 +270,10 @@ function add(it, parent) {
     it.paras.forEach((p, i) => {
       if (i) sb.addText(' ');
       const pa = sb.paragraphAtts; pa.alignXType = ALIGN[p.align] || ParagraphAlignXType.Left;
-      pa.relativeLeading = p.lh; pa.leftIndent = p.li; pa.rightIndent = p.ri; pa.firstLineIndent = p.fi;
+      pa.relativeLeading = p.lh;
+      if (p.la) { pa.leadingType = ParagraphLeadingType.ExactlyAbsolute; pa.absoluteLeading = p.la; }
+      else pa.leadingType = ParagraphLeadingType.RelativeToIdeal;
+      pa.leftIndent = p.li; pa.rightIndent = p.ri; pa.firstLineIndent = p.fi;
       pa.spaceBefore = p.sb; pa.spaceAfter = p.sa; pa.defaultTabStops = p.tab;
       sb.setParagraphAtts(pa);
       for (const r of p.runs) {

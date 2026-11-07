@@ -919,7 +919,7 @@ function bindProps(el: HTMLElement, nodes: SceneNode[], b: Box) {
       else if (k === "font") { if (!styleCommand("font", v)) applyToRuns((r) => { r.font = v; }); }
       else if (k === "fsize" && !isNaN(num)) { if (!styleCommand("size", String(fromPt(num)))) applyToRuns((r) => { r.size = fromPt(num); }); }
       else if (k === "fcolor") { if (!styleCommand("color", v)) applyToRuns((r) => { r.color = v; }); }
-      else if (k === "lh" && !isNaN(num)) applyToParas((p) => { p.lineHeight = num; });
+      else if (k === "lh" && !isNaN(num)) applyToParas((p) => { p.lineHeight = num; delete p.leading; });
       else if (k === "level") { if (!styleCommand("level", v)) applyToParas((p) => { p.level = +v as Paragraph["level"]; }); }
       else if (k === "sb" && !isNaN(num)) applyToParas((p) => { p.spaceBefore = fromPt(num); });
       else if (k === "sa" && !isNaN(num)) applyToParas((p) => { p.spaceAfter = fromPt(num); });

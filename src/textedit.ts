@@ -12,7 +12,7 @@ let editingId: string | null = null;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function runCss(r: Run) {
-  return `font-family:'${r.font}';font-size:${fmt(r.size)}px;font-weight:${r.weight};font-style:${r.italic ? "italic" : "normal"};color:${r.color};text-decoration:${r.underline ? "underline" : "none"}`;
+  return `font-family:'${r.font}';font-size:${fmt(r.size)}px;font-weight:${r.weight};font-style:${r.italic ? "italic" : "normal"};color:${r.color};text-decoration:${r.underline ? "underline" : "none"}${r.tracking ? `;letter-spacing:${fmt(r.tracking * r.size)}px` : ""}`;
 }
 
 export function openTextEditor(id: string) {
@@ -27,7 +27,7 @@ export function openTextEditor(id: string) {
   const p0 = n.paragraphs[0];
   const fm = fontMetrics(first);
   // aligner la 1re ligne de base CSS sur celle du rendu (capitales au haut du cadre)
-  const L0 = fm.ideal * first.size * (p0?.lineHeight || 1);
+  const L0 = p0?.leading ?? fm.ideal * first.size * (p0?.lineHeight || 1);
   const cssBase = (L0 - (fm.asc + fm.desc) * first.size) / 2 + fm.asc * first.size;
   const f = n.frame ? { ...n.frame, y: n.frame.y + (p0?.spaceBefore ?? 0) + fm.cap * first.size - cssBase - (p0?.spaceBefore ?? 0) } : { x: 0, y: -cssBase, w: 0, h: 0 };
   const div = document.createElement("div");
@@ -37,10 +37,12 @@ export function openTextEditor(id: string) {
   div.lang = "fr";
   div.style.transform = `matrix(${M.map(fmt).join(",")}) translate(${fmt(f.x)}px, ${fmt(f.y)}px)`;
   if (n.frame) { div.style.width = `${n.frame.w}px`; div.style.minHeight = `${n.frame.h}px`; }
+  if (n.noWrap) div.style.whiteSpace = "pre"; // texte artistique : pas de retour automatique
   else { div.style.whiteSpace = "pre"; div.style.minWidth = "40px"; }
   div.innerHTML = n.paragraphs.map((p, i) => {
-    const lh = Math.max(...p.runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
-    const inner = p.runs.filter((r) => r.text).map((r) => `<span style="${runCss(r)}">${esc(r.text).replace(/\n/g, "<br>")}</span>`).join("");
+    const base = p.leading ?? Math.max(...p.runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
+    const lh = p.runs.some((r) => r.leading) ? Math.max(...p.runs.map((r) => r.leading ?? base)) : base;
+    const inner = p.runs.filter((r) => r.text).map((r) => `<span${r.leading ? ` data-lead="${fmt(r.leading)}"` : ""} style="${runCss(r)}">${esc(r.text).replace(/\n/g, "<br>")}</span>`).join("");
     return `<div data-level="${p.level ?? 0}" style="text-align:${p.align};line-height:${fmt(lh)}px;margin-top:${fmt(i === 0 ? 0 : p.spaceBefore)}px;margin-bottom:${fmt(p.spaceAfter)}px;padding-left:${fmt(p.leftIndent ?? 0)}px;padding-right:${fmt(p.rightIndent ?? 0)}px;text-indent:${fmt(p.firstIndent ?? 0)}px;tab-size:${fmt(p.tabStop || 50)}px">${inner || `<span style="${runCss(p.runs[0] ?? first)}"><br></span>`}</div>`;
   }).join("") || `<div><span style="${runCss(first)}"><br></span></div>`;
   stageEl().appendChild(div);
@@ -101,8 +103,13 @@ function readEditor(div: HTMLDivElement, old: TextNode): Paragraph[] {
         color: toHex(cs.color),
         opacity: 1,
       };
+      // interligne propre aux caractères (importé d'Affinity) : conservé par un attribut du span
+      const lead = parseFloat(el.closest("[data-lead]")?.getAttribute("data-lead") ?? "");
+      if (lead > 0) r.leading = lead;
+      const ls = parseFloat(cs.letterSpacing);
+      if (ls && r.size) r.tracking = ls / r.size;
       const last = runs[runs.length - 1];
-      if (last && last.font === r.font && last.size === r.size && last.weight === r.weight && last.italic === r.italic && last.underline === r.underline && last.color === r.color) last.text += text;
+      if (last && last.font === r.font && last.size === r.size && last.weight === r.weight && last.italic === r.italic && last.underline === r.underline && last.color === r.color && last.leading === r.leading && last.tracking === r.tracking) last.text += text;
       else runs.push(r);
     };
     const visit = (node: Node) => {

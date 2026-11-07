@@ -7,6 +7,7 @@ import { hasCharteMasters, updateCharteMasters } from "./charte";
 import { openPresentSpace, initPresentSpace } from "./presentspace";
 import { docBrowser } from "./docbrowser";
 import { reimportAffinity } from "./reimport";
+import { imageManager } from "./imagemanager";
 import { showCharte, checkCharteDialog, variantDialog } from "./charteview";
 import { initPanels, refreshCompetencesPanel, tablePicker, templatePicker, copyCharteToLayers } from "./panels";
 import { closeTextEditor, isEditingText, openTextEditor } from "./textedit";
@@ -250,6 +251,7 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
   present: () => { closeTextEditor(); store.editingMaster = null; startPresentation(); },
   presentmenu: () => { closeTextEditor(); store.editingMaster = null; openPresentSpace(); },
   docs: () => docBrowser(openFile),
+  images: () => imageManager((msg, err) => { status(msg, !!err); checkLinks(); }),
   reimport: async () => {
     closeTextEditor();
     status("Réimport du fichier Affinity…");

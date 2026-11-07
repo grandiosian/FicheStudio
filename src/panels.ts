@@ -18,6 +18,7 @@ import { competencePill, themeColor, fixLevel, LEVELS, charteMasters, makeTable,
 import { variantOf, PREFS, palette, TEXT_STYLES, applyTextStyle } from "./charte";
 import { builtinItems, deleteItem, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
 import { embedAsset, relinkImage, canLinkFiles } from "./assets";
+import { imageManager } from "./imagemanager";
 import { viewCenter } from "./canvas";
 import { layerPagesDialog, layerKind } from "./layerpages";
 import { inv } from "./geom";
@@ -614,6 +615,7 @@ function refreshProps() {
     parts.push(`<section><h4>Image</h4><p class="hint">${esc(a?.name ?? "")} — ${esc(src)}</p>
       <div class="btnrow wrap">${a && !a.data ? `<button data-act="img-embed" title="Copier l'image dans le document">Intégrer</button>` : ""}
       ${canLinkFiles() ? `<button data-act="img-relink" title="Choisir le fichier lié (copie ou nouvel emplacement)">Relier…</button>` : ""}
+      <button data-act="img-manager" title="Toutes les images du document : introuvables, relocaliser dans un dossier…">Images…</button>
       <button data-act="img-size" title="Revenir aux proportions d'origine">Proportions d'origine</button></div></section>`);
   }
   if (texts.length || editing) {
@@ -966,6 +968,7 @@ function bindProps(el: HTMLElement, nodes: SceneNode[], b: Box) {
         front: () => arrange("front"), back: () => arrange("back"), up: () => arrange("up"), down: () => arrange("down"),
         group: groupSelection, ungroup: ungroupSelection, mask: maskSelection, dup: duplicate, del: deleteSelection, curves: convertToCurves,
         "img-embed": async () => { const n = nodes[0]; if (n.type !== "image") return; store.checkpoint(); await embedAsset(store.doc, n.asset); store.emit("change"); },
+        "img-manager": () => imageManager((m) => { const st = document.querySelector("#status"); if (st) st.textContent = m; }),
         "img-relink": async () => { const n = nodes[0]; if (n.type !== "image") return; store.checkpoint(); await relinkImage(store.doc, n.asset); store.emit("change"); },
         "img-size": () => { const n = nodes[0]; if (n.type !== "image") return; const a = store.doc.assets[n.asset]; if (a?.w && a.h) store.commit(() => { n.h = (n.w * a.h!) / a.w!; }); },
       } as Record<string, () => void>)[a]?.();

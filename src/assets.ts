@@ -124,3 +124,97 @@ function imageSize(url: string): Promise<{ w: number; h: number }> {
     img.src = url;
   });
 }
+
+// ---------------------------------------------------------------- gestionnaire d'images : relocalisation
+
+const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", tif: "image/tiff", tiff: "image/tiff", psd: "image/vnd.adobe.photoshop" };
+const mimeOfName = (n: string) => MIME[n.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+const stemOf = (n: string) => n.toLowerCase().replace(/\.[^.]+$/, "");
+
+/** Chemin d'origine d'une image liée (fichier du disque ou image d'un .af servie en local). */
+export function linkedPath(a: Asset): string | null {
+  if (a.link?.kind === "file") return a.link.path;
+  if (a.link?.kind === "url" && a.link.url.startsWith("__localdocs/image?")) {
+    return new URLSearchParams(a.link.url.slice(a.link.url.indexOf("?") + 1)).get("path");
+  }
+  return null;
+}
+
+/** Parmi plusieurs fichiers de même nom, celui dont le chemin ressemble le plus à l'ancien (fin de chemin commune). */
+function closest(paths: string[], old: string | null): string {
+  if (paths.length < 2 || !old) return paths[0];
+  const tail = old.split(/[\\/]/).reverse();
+  const score = (p: string) => { const s = p.split(/[\\/]/).reverse(); let k = 0; while (k < s.length && k < tail.length && s[k].toLowerCase() === tail[k].toLowerCase()) k++; return k; };
+  return [...paths].sort((a, b) => score(b) - score(a))[0];
+}
+
+export interface RelocateResult { found: string[]; renamed: string[]; missing: string[] }
+
+/** Version locale (npm run dev) : cherche les images dans un dossier du Mac ; le lien garde le chemin complet. */
+export async function relocateInFolder(doc: Doc, keys: string[], root: string): Promise<RelocateResult> {
+  const want = keys.map((k) => ({ k, a: doc.assets[k] })).filter((x) => x.a);
+  const nameOf = (a: Asset) => baseName(linkedPath(a) ?? a.name);
+  const r = await fetch(`__localdocs/findimages?root=${encodeURIComponent(root)}`, { method: "POST", body: JSON.stringify({ names: want.map((x) => nameOf(x.a)) }) });
+  const res = await r.json().catch(() => ({ error: "réponse illisible" }));
+  if (!r.ok || res.error) throw new Error(res.error ?? "dossier inaccessible");
+  const out: RelocateResult = { found: [], renamed: [], missing: [] };
+  for (const { k, a } of want) {
+    const nm = nameOf(a);
+    const exact: string[] = res.exact?.[nm.toLowerCase()] ?? [];
+    const same: string[] = res.same?.[stemOf(nm)] ?? [];
+    const pick = exact.length ? closest(exact, linkedPath(a)) : same.length ? closest(same, linkedPath(a)) : null;
+    if (!pick) { out.missing.push(k); continue; }
+    (exact.length ? out.found : out.renamed).push(k);
+    doc.assets[k] = { ...a, name: baseName(pick), mime: mimeOfName(pick) || a.mime, link: { kind: "url", url: `__localdocs/image?path=${encodeURIComponent(pick)}` }, data: undefined };
+    urls.delete(k);
+    missing.delete(k);
+  }
+  return out;
+}
+
+type DirHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
+
+/** Version navigateur : choix d'un dossier (API File System Access), liens vers les fichiers trouvés. */
+export async function relocateWithPicker(doc: Doc, keys: string[]): Promise<RelocateResult> {
+  const pick = (window as unknown as { showDirectoryPicker?: (o?: object) => Promise<DirHandle> }).showDirectoryPicker;
+  if (!pick) throw new Error("ce navigateur ne permet pas de choisir un dossier (Chrome ou Edge requis)");
+  const dir = await pick({ id: "fichestudio-images", mode: "read" });
+  const byName = new Map<string, { h: FileSystemFileHandle; path: string }[]>();
+  const byStem = new Map<string, { h: FileSystemFileHandle; path: string }[]>();
+  let seen = 0;
+  const walkDir = async (d: DirHandle, path: string, depth: number) => {
+    if (depth > 10 || seen > 60000) return;
+    for await (const h of d.values()) {
+      if (h.name.startsWith(".")) continue;
+      seen++;
+      if (h.kind === "directory") await walkDir(h as DirHandle, `${path}${h.name}/`, depth + 1);
+      else if (/\.(png|jpe?g|gif|webp|svg|tiff?|psd)$/i.test(h.name)) {
+        const e = { h: h as FileSystemFileHandle, path: path + h.name };
+        (byName.get(h.name.toLowerCase()) ?? byName.set(h.name.toLowerCase(), []).get(h.name.toLowerCase())!).push(e);
+        (byStem.get(stemOf(h.name)) ?? byStem.set(stemOf(h.name), []).get(stemOf(h.name))!).push(e);
+      }
+    }
+  };
+  await walkDir(dir, `${dir.name}/`, 0);
+  const out: RelocateResult = { found: [], renamed: [], missing: [] };
+  for (const k of keys) {
+    const a = doc.assets[k];
+    if (!a) continue;
+    const nm = baseName(linkedPath(a) ?? a.name);
+    const exact = byName.get(nm.toLowerCase()) ?? [];
+    // même nom, autre extension : on préfère un format que le navigateur affiche
+    const same = (byStem.get(stemOf(nm)) ?? []).filter((e) => !exact.includes(e)).sort((x, y) => Number(/\.(tiff?|psd)$/i.test(x.path)) - Number(/\.(tiff?|psd)$/i.test(y.path)));
+    const list = exact.length ? exact : same;
+    if (!list.length) { out.missing.push(k); continue; }
+    const best = list.find((e) => e.path === closest(list.map((x) => x.path), linkedPath(a))) ?? list[0];
+    const f = await best.h.getFile();
+    const hk = uid("h");
+    await putHandle(hk, best.h);
+    doc.assets[k] = { ...a, name: f.name, mime: f.type || mimeOfName(f.name), link: { kind: "file", handle: hk, path: best.path }, data: undefined };
+    urls.set(k, URL.createObjectURL(f));
+    missing.delete(k);
+    (exact.length ? out.found : out.renamed).push(k);
+  }
+  return out;
+}

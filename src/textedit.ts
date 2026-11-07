@@ -2,7 +2,7 @@
 import { store } from "./store";
 import { screenMatrixOf, stageEl, render, drawOverlay } from "./canvas";
 import { defaultRun, newParagraph, type Paragraph, type Run, type TextNode } from "./model";
-import { fontMetrics, textHeight } from "./textlayout";
+import { fontMetrics, layoutText, textHeight } from "./textlayout";
 import { prepareText, varsFor } from "./templates";
 import { fmt } from "./geom";
 
@@ -32,12 +32,21 @@ export function openTextEditor(id: string) {
   store.select([id]);
   const M = screenMatrixOf(id);
   const first = n.paragraphs[0]?.runs[0] ?? defaultRun();
+  // Chaque paragraphe : sa police sert de référence de ligne (« strut » CSS) et les fragments ne
+  // grandissent pas les lignes ; l'interligne CSS vaut alors exactement celui de la composition.
+  const lhOf = (p: Paragraph) => {
+    const base = p.leading ?? Math.max(...p.runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
+    return p.runs.some((r) => r.leading) ? Math.max(...p.runs.map((r) => r.leading ?? base)) : base;
+  };
+  // (Chrome arrondit l'ascendante et la descendante au pixel dans sa mise en ligne)
+  const strut = (p: Paragraph) => { const r = p.runs[0] ?? first, m = fontMetrics(r); return { r, a: Math.round(m.asc * r.size), d: Math.round(m.desc * r.size) }; };
+  // position de la ligne de base CSS dans une ligne de hauteur lh
+  const cssBase = (p: Paragraph) => { const s = strut(p); return (lhOf(p) - s.a - s.d) / 2 + s.a; };
+  // 1re ligne de base : celle de la composition (alignement vertical du cadre compris)
+  const laid = layoutText(prepareText(n, null, store.doc.numbering, varsFor(store.doc, store.pageIndex)));
   const p0 = n.paragraphs[0];
-  const fm = fontMetrics(first);
-  // aligner la 1re ligne de base CSS sur celle du rendu (capitales au haut du cadre)
-  const L0 = p0?.leading ?? fm.ideal * first.size * (p0?.lineHeight || 1);
-  const cssBase = (L0 - (fm.asc + fm.desc) * first.size) / 2 + fm.asc * first.size;
-  const f = n.frame ? { ...n.frame, y: n.frame.y + (p0?.spaceBefore ?? 0) + fm.cap * first.size - cssBase - (p0?.spaceBefore ?? 0) } : { x: 0, y: -cssBase, w: 0, h: 0 };
+  const b0 = laid[0]?.y ?? (n.frame ? n.frame.y + fontMetrics(first).cap * first.size : 0);
+  const f = n.frame ? { ...n.frame, y: b0 - (p0 ? cssBase(p0) : 0) } : { x: 0, y: b0 - (p0 ? cssBase(p0) : 0), w: 0, h: 0 };
   const div = document.createElement("div");
   div.className = "text-editor";
   div.contentEditable = "true";
@@ -50,10 +59,16 @@ export function openTextEditor(id: string) {
     if (n.noWrap) div.style.whiteSpace = "pre"; // texte artistique : pas de retour automatique
   } else { div.style.whiteSpace = "pre"; div.style.minWidth = "40px"; }
   div.innerHTML = n.paragraphs.map((p, i) => {
-    const base = p.leading ?? Math.max(...p.runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
-    const lh = p.runs.some((r) => r.leading) ? Math.max(...p.runs.map((r) => r.leading ?? base)) : base;
+    const lh = lhOf(p), s = strut(p);
+    // écart avec le paragraphe précédent : celui de la composition (espaces après + avant + interligne),
+    // diminué de ce que CSS place déjà entre les deux lignes de base
+    let mt = 0;
+    if (i > 0) {
+      const q = n.paragraphs[i - 1];
+      mt = q.spaceAfter + p.spaceBefore + lh - (lhOf(q) - cssBase(q) + cssBase(p));
+    }
     const inner = p.runs.filter((r) => r.text).map((r) => `<span${r.leading ? ` data-lead="${fmt(r.leading)}"` : ""} style="${runCss(r)}">${esc(r.text).replace(/\n/g, "<br>")}</span>`).join("");
-    return `<div data-level="${p.level ?? 0}" style="text-align:${p.align};line-height:${fmt(lh)}px;margin-top:${fmt(i === 0 ? 0 : p.spaceBefore)}px;margin-bottom:${fmt(p.spaceAfter)}px;padding-left:${fmt(p.leftIndent ?? 0)}px;padding-right:${fmt(p.rightIndent ?? 0)}px;text-indent:${fmt(p.firstIndent ?? 0)}px;tab-size:${fmt(p.tabStop || 50)}px">${inner || `<span style="${runCss(p.runs[0] ?? first)}"><br></span>`}</div>`;
+    return `<div data-level="${p.level ?? 0}" style="font:${s.r.italic ? "italic " : ""}${s.r.weight} ${fmt(s.r.size)}px '${s.r.font}';text-align:${p.align};line-height:${fmt(lh)}px;margin:${fmt(mt)}px 0 0;padding-left:${fmt(p.leftIndent ?? 0)}px;padding-right:${fmt(p.rightIndent ?? 0)}px;text-indent:${fmt(p.firstIndent ?? 0)}px;tab-size:${fmt(p.tabStop || 50)}px">${inner || `<span style="${runCss(p.runs[0] ?? first)}"><br></span>`}</div>`;
   }).join("") || `<div><span style="${runCss(first)}"><br></span></div>`;
   stageEl().appendChild(div);
   editor = div;

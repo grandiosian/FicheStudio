@@ -123,6 +123,38 @@ const localDocs: Connect.NextHandleFunction = (req, res) => {
   const root = safeRoot(u.searchParams.get("root"));
   if (!root) return json({ error: "Dossier introuvable ou hors du dossier personnel." }, 400);
   if (u.pathname === "/list") return json({ root, files: scan(root) });
+  if (u.pathname === "/findimages") {
+    // gestionnaire d'images : retrouve des fichiers par nom (ou même nom, autre extension) sous un dossier
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c));
+    req.on("end", () => {
+      let names: string[] = [];
+      try { names = JSON.parse(Buffer.concat(chunks).toString("utf8")).names ?? []; } catch { /* corps illisible */ }
+      const stem = (n: string) => n.toLowerCase().replace(/\.[^.]+$/, "");
+      const wantName = new Set(names.map((n) => n.toLowerCase())), wantStem = new Set(names.map(stem));
+      const exact: Record<string, string[]> = {}, same: Record<string, string[]> = {};
+      let seen = 0;
+      const walk = (dir: string, depth: number) => {
+        if (depth > 10 || seen > 60000) return;
+        let items: string[] = [];
+        try { items = readdirSync(dir); } catch { return; }
+        for (const n of items) {
+          if (n.startsWith(".") || SKIP.has(n)) continue;
+          seen++;
+          const p = join(dir, n);
+          let st;
+          try { st = statSync(p); } catch { continue; }
+          if (st.isDirectory()) { walk(p, depth + 1); continue; }
+          if (!IMG.test(n)) continue;
+          if (wantName.has(n.toLowerCase())) (exact[n.toLowerCase()] ??= []).push(p);
+          else if (wantStem.has(stem(n))) (same[stem(n)] ??= []).push(p);
+        }
+      };
+      walk(root, 0);
+      json({ root, exact, same });
+    });
+    return;
+  }
   const file = safeFile(root, u.searchParams.get("rel"));
   if (!file) return json({ error: "Fichier introuvable." }, 404);
   if (u.pathname === "/thumb") {

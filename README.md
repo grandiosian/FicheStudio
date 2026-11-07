@@ -192,6 +192,15 @@ avec une largeur ajustée pour que la mise en page ne bouge pas.
 
 ### Fidélité avec Affinity
 
+**Images…** (menu FicheStudio, ou bouton « Images… » d'une image sélectionnée) : toutes les images du
+document — intégrées, liées au Mac, liées par URL ou par fichier — avec vignette, chemin d'origine,
+utilisation (feuille et calque) et état ; filtres (introuvables, liées, intégrées, inutilisées) et
+recherche. Par image : Voir (sélection dans la feuille), Relier…, Intégrer. **Relocaliser** : pour les
+images cochées (par défaut les introuvables), cherche dans un dossier et ses sous-dossiers un fichier du
+même nom — à défaut du même nom avec une autre extension — et y relie l'image ; en local (`npm run dev`)
+par un chemin de dossier du Mac (lien durable), sinon par le choix d'un dossier (Chrome / Edge). Intégrer
+les cochées, retirer les inutilisées.
+
 **Réimporter depuis Affinity** (menu FicheStudio) : quand le lecteur .af progresse, un document déjà
 ouvert garde l'ancien import (les onglets sont restaurés tels quels au rechargement). Cette commande
 relit le .af d'origine (dossier mémorisé à l'import, sinon recherche dans le dossier de l'explorateur de

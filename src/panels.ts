@@ -15,6 +15,7 @@ import { findVars, parseCsv, SCHEMES } from "./templates";
 import { atelierMaster, builtinItems, deleteItem, emptyMaster, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
 import { embedAsset, relinkImage, canLinkFiles } from "./assets";
 import { viewCenter } from "./canvas";
+import { layerPagesDialog } from "./layerpages";
 import { inv } from "./geom";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -66,7 +67,8 @@ function refreshPages() {
     <div class="panel-head"><h3>Feuilles</h3>
       <button data-a="add" title="Ajouter une feuille (même gabarit et même découpage)">＋</button>
       <button data-a="dup" title="Dupliquer la feuille">⧉</button>
-      <button data-a="del" title="Supprimer la feuille">🗑</button></div>
+      <button data-a="del" title="Supprimer la feuille">🗑</button>
+      <button data-a="l2p" title="Calques → feuilles : faire une feuille de chaque calque choisi" ${store.editingMaster ? "disabled" : ""}>⇉</button></div>
     <ol class="page-list">${store.doc.pages.map((p, i) => `<li class="${!store.editingMaster && i === store.pageIndex ? "on" : ""}" data-i="${i}"><span class="num">${i + 1}</span><span class="nm">${esc(p.name)}</span><span class="badge">${(p.sections ?? 1) > 1 ? `✂${p.sections}` : ""}${p.master ? " ▤" : ""}</span></li>`).join("")}</ol>
     <div class="panel-head sub"><h3>Gabarits</h3>
       <button data-a="m-atelier" title="Nouveau gabarit « Atelier » (barres haut et bas)">＋ Atelier</button>
@@ -104,6 +106,7 @@ function refreshPages() {
     };
   });
   const cur = () => store.doc.pages[store.pageIndex];
+  el.querySelector<HTMLElement>('[data-a="l2p"]')!.onclick = () => layerPagesDialog((msg) => document.dispatchEvent(new CustomEvent("status", { detail: msg })));
   el.querySelector<HTMLElement>('[data-a="add"]')!.onclick = () => store.commit(() => {
     store.doc.pages.splice(store.pageIndex + 1, 0, nextPage(cur()));
     store.pageIndex++; store.editingMaster = null; store.selection = [];

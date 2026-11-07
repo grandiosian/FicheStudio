@@ -24,6 +24,9 @@ export interface Session {
 
 let sid = 0;
 
+/** Images retirées d'un document : gardées pour pouvoir annuler (les clés sont uniques). */
+export const assetTrash: Record<string, Doc["assets"][string]> = {};
+
 class Store {
   tabs: Session[] = [];
   activeTab = 0;
@@ -61,11 +64,17 @@ class Store {
 
   private snap(): Snapshot {
     const { pages, data, name, dpi, masters, fields, levelColors, numbering } = this.doc;
-    return JSON.stringify({ pages, data, name, dpi, masters, fields, levelColors, numbering, pageIndex: this.pageIndex });
+    return JSON.stringify({ pages, data, name, dpi, masters, fields, levelColors, numbering, pageIndex: this.pageIndex, assetKeys: Object.keys(this.doc.assets) });
   }
   private restore(s: Snapshot) {
     const o = JSON.parse(s);
     Object.assign(this.doc, { pages: o.pages, data: o.data, name: o.name, dpi: o.dpi, masters: o.masters, fields: o.fields, levelColors: o.levelColors, numbering: o.numbering });
+    // images retirées depuis : on les remet (les données ne sont pas dans l'historique)
+    if (Array.isArray(o.assetKeys)) {
+      const keep = new Set<string>(o.assetKeys);
+      for (const k of keep) if (!this.doc.assets[k] && assetTrash[k]) this.doc.assets[k] = assetTrash[k];
+      for (const k of Object.keys(this.doc.assets)) if (!keep.has(k)) { assetTrash[k] = this.doc.assets[k]; delete this.doc.assets[k]; }
+    }
     if (this.editingMaster && !this.doc.masters.some((m) => m.id === this.editingMaster)) this.editingMaster = null;
     this.pageIndex = o.pageIndex;
     this.selection = this.selection.filter((id) => this.find(id));

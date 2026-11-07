@@ -40,6 +40,10 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   (barre haute en haut de la 1re partie, barre basse en bas de la dernière) pour distribuer les
   parties au fil du cours ; « Gabarit posé : dans chaque partie » le répète (01a, 01b…).
   « Détacher le gabarit » le copie dans la feuille.
+- **Calques → feuilles** (Fichier, ou ⇉ dans Feuilles) : dans les fichiers d'atelier où chaque
+  fiche est un calque (P01…, R01…), crée une feuille par calque choisi (sélection rapide Pages /
+  Ressources), garde ou retire les corrigés `_Corr`, retire les images devenues inutiles,
+  dans le document ou dans un nouvel onglet. Annulable.
 - **Onglets** : plusieurs documents ouverts à la fois, chacun avec son historique d'annulation ;
   ● = modifié depuis le dernier enregistrement. Tous les onglets sont restaurés au redémarrage.
 - **Exemples** : Fichier › Exemples ouvre les fichiers du dossier `samples/` (avec `npm run dev`

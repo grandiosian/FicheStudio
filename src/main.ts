@@ -12,6 +12,7 @@ import type { PdfOptions } from "./io/pdfexport";
 // pdf-lib et fontkit sont lourds : chargés seulement pour l'export PDF
 const pdfModule = () => import("./io/pdfexport");
 import { canLinkFiles, linkLocalImage, linkUrlImage, resolveLinks } from "./assets";
+import { layerPagesDialog } from "./layerpages";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -220,6 +221,7 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
     download(`${store.doc.name.replace(/[\\/:*?"<>|]+/g, "_")}.affinity.js`, js, "text/javascript");
     status("Script Affinity téléchargé : exécutez-le dans Affinity pour obtenir un .af natif.");
   },
+  l2p: () => { if (!store.editingMaster) layerPagesDialog((msg) => status(msg)); },
   undo: () => store.undo(),
   redo: () => store.redo(),
   fit: () => zoomToFit(),
@@ -364,6 +366,7 @@ async function start() {
   });
   window.addEventListener("beforeunload", () => closeTextEditor());
   document.addEventListener("pdf-dialog", (e) => pdfDialog(!!(e as CustomEvent).detail?.series));
+  document.addEventListener("status", (e) => status(String((e as CustomEvent).detail)));
   // onglets Calques / Bibliothèque
   document.querySelectorAll<HTMLElement>("#left .tabs button").forEach((b) => (b.onclick = () => {
     document.querySelectorAll<HTMLElement>("#left .tabs button").forEach((x) => x.classList.toggle("on", x === b));

@@ -29,6 +29,7 @@ interface Base {
   transform: Mat;
   tag?: string | null;   // couleur d'étiquette (calques, groupes)
   step?: boolean;        // étape de correction : révélée pas à pas en présentation
+  comp?: string[];       // compétences travaillées (codes du BO : T1C11…), calques et groupes
 }
 
 export interface Vec { x: number; y: number }
@@ -242,7 +243,7 @@ export function newPage(width = 2480, height = 3508, name = "Page 1"): Page {
 }
 
 // couleurs de pastille de niveau de la charte (5e vert, 4e jaune, 3e rouge)
-export const DEFAULT_LEVEL_COLORS: Record<string, string> = { "6": "#e94e77", "5": "#30c700", "4": "#fcca30", "3": "#d82834" };
+export const DEFAULT_LEVEL_COLORS: Record<string, string> = { "5": "#30c700", "4": "#fcca30", "3": "#d82834" };
 
 export function newDoc(name = "Sans titre"): Doc {
   return {

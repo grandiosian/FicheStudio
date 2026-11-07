@@ -6,6 +6,8 @@ import {
 } from "./geom";
 import { newPath, newShape, newText, NONE, sectionRects, type Anchor, type Mat, type PathNode, type SceneNode, type Vec } from "./model";
 import { addToLayer, transformNode } from "./ops";
+import { isolateIds } from "./competences";
+import { themeColor } from "./charte";
 import { openTextEditor } from "./textedit";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -24,7 +26,7 @@ const toScreen = (p: Vec): Vec => ({ x: p.x * view.zoom + view.x, y: p.y * view.
 
 export function initCanvas(el: HTMLElement) {
   stage = el;
-  stage.insertAdjacentHTML("afterbegin", `<svg id="canvas" xmlns="${NS}"><defs></defs><g id="world"><rect id="page-shadow"/><g id="content"></g></g><g id="overlay"></g></svg>`);
+  stage.insertAdjacentHTML("afterbegin", `<svg id="canvas" xmlns="${NS}"><defs></defs><g id="world"><rect id="page-shadow"/><g id="content"></g><g id="comp-badges"></g></g><g id="overlay"></g></svg>`);
   svg = stage.querySelector("svg")!;
   defs = svg.querySelector("defs")!;
   world = svg.querySelector("#world")!;
@@ -48,14 +50,55 @@ export function render() {
   const page = store.page;
   if (page.id !== lastPageId) { lastPageId = page.id; requestAnimationFrame(() => zoomToFit()); }
   const row = store.previewRow !== null ? store.doc.data.rows[store.previewRow] ?? null : null;
-  const { defs: d, body } = renderPage(store.doc, page, { editor: true, row });
+  const { defs: d, body } = renderPage(store.doc, page, { editor: true, row, isolate: currentIsolation() });
   defs.innerHTML = d;
   content.innerHTML = body;
   const sh = svg.querySelector("#page-shadow")!;
   sh.setAttribute("width", String(page.width));
   sh.setAttribute("height", String(page.height));
   if (store.editingText) content.querySelector(`[data-id="${store.editingText}"]`)?.setAttribute("opacity", "0");
+  drawCompBadges();
   applyView();
+}
+
+/** Vue création : pastilles des compétences attribuées, dans la marge gauche (x = 8, comme la charte),
+ *  à hauteur du haut de l'élément, empilées l'une sous l'autre ; jamais imprimées. */
+function drawCompBadges() {
+  const g = svg.querySelector<SVGGElement>("#comp-badges")!;
+  const keep = currentIsolation();
+  const items: { y: number; codes: string[] }[] = [];
+  // pastilles déjà posées sur la feuille (groupe « …_Comp ») : pas de doublon
+  const placed = (n: SceneNode, siblings: SceneNode[]) => [...siblings, ...(n.type === "group" ? n.children : [])].some((c) => c.name === `${n.name}_Comp`);
+  const busy: [number, number][] = []; // pastilles posées : la marge y est déjà occupée
+  const visit = (n: SceneNode, siblings: SceneNode[] = []) => {
+    if (keep && !keep.has(n.id)) return;
+    if (!n.visible && !(keep && n.type === "group" && n.isLayer)) return; // calque isolé : affiché même s'il est masqué
+    if (n.type === "group" && n.name.endsWith("_Comp")) { const b = nodeBox(n.id); if (b) busy.push([b.y, b.y + b.h]); return; }
+    if (n.comp?.length && (!keep || keep.has(n.id)) && !placed(n, siblings)) {
+      const b = nodeBox(n.id);
+      if (b && b.h > 0) items.push({ y: b.y, codes: n.comp });
+    }
+    if (n.type === "group") n.children.forEach((c) => visit(c, n.children));
+  };
+  store.page.layers.forEach((l) => visit(l));
+  items.sort((a, b) => a.y - b.y);
+  const H = 42, GAP = 8, out: string[] = [];
+  let floor = -Infinity;
+  for (const it of items) {
+    let y = Math.max(it.y, floor);
+    const h = it.codes.length * (H + GAP);
+    for (let k = 0; k < busy.length; k++) {
+      const [a, b] = busy[k];
+      if (y < b && y + h > a) { y = b + GAP * 2; k = -1; } // recommencer après avoir sauté la zone
+    }
+    for (const code of it.codes) {
+      out.push(`<g class="comp-badge"><rect x="8" y="${fmt(y)}" width="126" height="${H}" rx="21" fill="${themeColor(code)}"/>`
+        + `<text x="71" y="${fmt(y + 30)}" text-anchor="middle" style="font:700 33px 'Arial Narrow',Arial,sans-serif;fill:#fff">${code}</text></g>`);
+      y += H + GAP;
+    }
+    floor = y + GAP * 2; // un peu d'air entre deux piles
+  }
+  g.innerHTML = out.join("");
 }
 
 function applyView() {
@@ -86,6 +129,82 @@ export function zoomToWidth() {
 
 /** Cadre sur un objet ou un calque : zoom animé sur sa boîte englobante, puis bref repère. */
 let frameAnim = 0;
+// ------------------------------------------------------------------ vue isolée
+
+let isoSaved: { zoom: number; x: number; y: number; page: number } | null = null;
+
+/** Éléments affichés en vue isolée : les éléments choisis, leur contenu et leurs parents
+ *  (pour les dessiner à leur place) ; sinon l'isolement par compétence s'il est actif. */
+export function currentIsolation(): Set<string> | null {
+  const roots = store.isoRoots;
+  if (roots) {
+    const keep = new Set<string>();
+    const all = (n: SceneNode) => { keep.add(n.id); if (n.type === "group") n.children.forEach(all); };
+    let found = 0;
+    for (const id of roots) {
+      const layer = store.page.layers.find((l) => l.id === id);
+      if (layer) { all(layer); found++; continue; }
+      let f = store.find(id);
+      if (!f) continue;
+      found++;
+      all(f.node);
+      while (f) { keep.add(f.parent.id); f = store.find(f.parent.id); }
+    }
+    if (found) return keep;
+    exitIsolation(false); // éléments supprimés ou autre feuille : on sort de l'isolement
+  }
+  return isolateIds(store.page.layers);
+}
+
+/** Entre en vue isolée sur ces éléments, cadrés à l'écran ; la vue d'avant est gardée. */
+export function enterIsolation(ids: string[]) {
+  if (!ids.length) return;
+  if (!store.isoRoots) isoSaved = { zoom: view.zoom, x: view.x, y: view.y, page: store.pageIndex };
+  store.isoRoots = [...ids];
+  isoBanner();
+  store.emit("change");
+  requestAnimationFrame(() => {
+    const boxes = ids.map((id) => nodeBox(id)).filter((b): b is Box => !!b && b.w > 0);
+    if (boxes.length) zoomToBox(boxOfPoints(boxes.flatMap((b) => [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y + b.h }])), 80);
+  });
+}
+
+/** Sort de la vue isolée et revient exactement à la vue d'avant (même zoom, même position). */
+export function exitIsolation(restore = true) {
+  if (!store.isoRoots) return;
+  store.isoRoots = null;
+  document.querySelector("#workiso-banner")?.remove();
+  const saved = isoSaved;
+  isoSaved = null;
+  if (!restore) return;
+  store.emit("change");
+  if (saved && saved.page === store.pageIndex) animateView(saved.zoom, saved.x, saved.y);
+}
+export const isIsolated = () => !!store.isoRoots;
+
+function isoBanner() {
+  let b = document.querySelector<HTMLElement>("#workiso-banner");
+  if (!b) { b = document.createElement("div"); b.id = "workiso-banner"; stage.appendChild(b); }
+  const names = (store.isoRoots ?? []).map((id) => (store.page.layers.find((l) => l.id === id) ?? store.find(id)?.node)?.name ?? "").filter(Boolean);
+  b.innerHTML = `<b>◎ Vue isolée</b><span>${names.slice(0, 2).join(", ").replace(/</g, "&lt;")}${names.length > 2 ? ` +${names.length - 2}` : ""}</span><button title="Revenir à la vue complète, au même endroit (Échap ou I)">Quitter la vue isolée</button>`;
+  b.querySelector("button")!.onclick = () => exitIsolation();
+}
+
+/** Animation de la vue vers un zoom et une position donnés. */
+function animateView(z1: number, x1: number, y1: number) {
+  const z0 = view.zoom, x0 = view.x, y0 = view.y;
+  const t0 = performance.now(), dur = 320, id = ++frameAnim;
+  const step = (now: number) => {
+    if (id !== frameAnim) return;
+    const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 3);
+    view.zoom = z0 * Math.pow(z1 / z0, e); view.x = x0 + (x1 - x0) * e; view.y = y0 + (y1 - y0) * e;
+    if (t >= 1) { view.zoom = z1; view.x = x1; view.y = y1; }
+    applyView();
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 export function zoomToBox(b: Box, pad = 48) {
   const r = stage.getBoundingClientRect();
   if (!r.width || b.w <= 0 || b.h <= 0) return zoomToFit();

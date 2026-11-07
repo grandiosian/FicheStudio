@@ -39,6 +39,10 @@ class Store {
   tool: Tool = "select";
   previewRow: number | null = null;   // ligne de données affichée en aperçu
   editingText: string | null = null;
+  /** Vue isolée : éléments (calques, groupes, objets) sur lesquels on travaille seuls. */
+  isoRoots: string[] | null = null;
+  /** Ajoute à la vue isolée un élément créé pendant l'isolement (sinon il resterait caché). */
+  isoAdd(ids: string[]) { if (this.isoRoots) this.isoRoots = [...new Set([...this.isoRoots, ...ids])]; }
   editingMaster: string | null = null; // gabarit en cours de modification
   private undoStack: Snapshot[] = [];
   private redoStack: Snapshot[] = [];
@@ -223,6 +227,14 @@ class Store {
    *  s'il est verrouillé, le plus haut calque modifiable (avec un message). */
   drawLayer(): GroupNode {
     const p = this.page;
+    // vue isolée : on dessine dans ce qu'on a isolé (le calque ou le groupe, sinon le parent de l'objet)
+    if (this.isoRoots?.length) {
+      const id = this.isoRoots[0];
+      const layer = p.layers.find((x) => x.id === id);
+      const f = layer ? null : this.find(id);
+      const target = layer ?? (f?.node.type === "group" ? f.node : f?.parent);
+      if (target && !target.locked) return target;
+    }
     let l = this.layer();
     if (l.locked) {
       const other = [...p.layers].reverse().find((x) => !x.locked);

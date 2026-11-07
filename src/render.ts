@@ -14,6 +14,7 @@ export interface RenderOpts {
   editor?: boolean;                     // ajoute data-id pour la sélection
   showHidden?: boolean;
   cutMarks?: boolean;                   // lignes de découpe entre les parties (défaut : oui)
+  isolate?: Set<string> | null;         // éditeur : seuls ces nœuds sont nets, le reste est estompé
 }
 
 class Ctx {
@@ -93,7 +94,10 @@ function text(c: Ctx, n: TextNode, editable: boolean): string {
 }
 
 function renderNode(c: Ctx, n: SceneNode, editable = true): string {
-  if (!n.visible && !c.opts.showHidden) return "";
+  const iso = c.opts.isolate;
+  // compétence isolée : seuls les calques qui la contiennent sont rendus, même s'ils sont masqués
+  if (iso && !iso.has(n.id)) return "";
+  if (!n.visible && !c.opts.showHidden && !(iso && n.type === "group" && n.isLayer)) return "";
   switch (n.type) {
     case "shape":
     case "path":
@@ -147,11 +151,14 @@ export function renderPage(doc: Doc, page: Page, opts: RenderOpts = {}): { defs:
   if (master && doc.pages.includes(page)) {
     masterAreas(page).forEach(({ rect: r, section: si }) => {
       c.vars = varsFor(doc, pi, si, opts.row ?? null);
+      const iso = c.opts.isolate;
+      c.opts.isolate = null; // l'isolement ne concerne que les calques de la feuille, pas le gabarit
       for (const l of master.layers) {
         if (!l.visible) continue;
         const m = masterLayerMatrix(master, l.anchor, r);
         parts.push(`<g class="master" transform="${svgMatrix(m)}">${renderNode(c, l, false)}</g>`);
       }
+      c.opts.isolate = iso;
     });
   }
   c.vars = varsFor(doc, pi, 0, opts.row ?? null);

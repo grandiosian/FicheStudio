@@ -1,8 +1,8 @@
 // Panneaux latéraux : pages, calques, propriétés, disposition, données.
 import { store } from "./store";
-import { selectionBoxes, render as renderCanvas, zoomToFit, frameNode } from "./canvas";
+import { selectionBoxes, render as renderCanvas, zoomToFit, frameNode, nodeBox as nodeBoxOf, currentIsolation, enterIsolation, exitIsolation, isIsolated } from "./canvas";
 import {
-  DEFAULT_LEVEL_COLORS, newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
+  DEFAULT_LEVEL_COLORS, newGroup, newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
   type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page, type GroupNode,
 } from "./model";
 import { mul, rotateAt, rotationOf, scaleAt, translate, boxOfPoints, type Box } from "./geom";
@@ -12,11 +12,11 @@ import {
 } from "./ops";
 import { isEditingText, styleCommand, insertAtCaret } from "./textedit";
 import { findVars, parseCsv, SCHEMES } from "./templates";
-import { refreshCompetences } from "./competences";
+import { refreshCompetences, compPicker, setFramer, setIsolated, isolated, subByCode } from "./competences";
 import { renderPage } from "./render";
-import { fixLevel, LEVELS, charteMasters, makeTable, applyTemplate, templateFor, TEMPLATES, TEMPLATE_PREFIX } from "./charte";
+import { competencePill, themeColor, fixLevel, LEVELS, charteMasters, makeTable, applyTemplate, templateFor, TEMPLATES, TEMPLATE_PREFIX } from "./charte";
 import { variantOf, PREFS, palette, TEXT_STYLES, applyTextStyle } from "./charte";
-import { atelierMaster, builtinItems, deleteItem, emptyMaster, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
+import { builtinItems, deleteItem, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
 import { embedAsset, relinkImage, canLinkFiles } from "./assets";
 import { viewCenter } from "./canvas";
 import { layerPagesDialog, layerKind } from "./layerpages";
@@ -35,6 +35,7 @@ const n1 = (v: number) => (Math.round(v * 10) / 10).toString();
 const FONTS = ["Arial", "Arial Narrow", "Arial Black", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Courier New", "Comic Sans MS", "Avenir Next", "Futura", "Gill Sans", "Open Sans", "Roboto", "Montserrat", "Lato", "OpenDyslexic"];
 
 export function initPanels() {
+  setFramer(frameNode);
   // pendant un réglage en direct (sélecteur de couleur), le panneau ne bouge pas
   store.on((why) => { if (why !== "live") refresh(); });
   document.addEventListener("textedit", () => refreshProps());
@@ -85,7 +86,7 @@ function kindOfLayer(l: GroupNode, page: Page): SheetKind {
 }
 
 /** Copie les modèles de la charte dans chaque calque de page ; les gabarits de la charte sont retirés. */
-function copyCharteToLayers() {
+export function copyCharteToLayers() {
   let n = 0;
   store.commit(() => {
     const d = store.doc;
@@ -109,7 +110,6 @@ function copyCharteToLayers() {
 
 function refreshPages() {
   const el = $("#pages");
-  const ms = store.doc.masters;
   el.innerHTML = `
     <div class="panel-head"><h3>Feuilles</h3>
       <button data-a="add" title="Ajouter une feuille : fiche, ressource, évaluation… (même gabarit et même découpage)">＋ ▾</button>
@@ -117,40 +117,13 @@ function refreshPages() {
       <button data-a="del" title="Supprimer la feuille">🗑</button>
       <button data-a="l2p" title="Calques → feuilles : faire une feuille de chaque calque choisi" ${store.editingMaster ? "disabled" : ""}>⇉</button></div>
     <ol class="page-list">${store.doc.pages.map((p, i) => `<li class="${!store.editingMaster && i === store.pageIndex ? "on" : ""}" data-i="${i}"><span class="num">${i + 1}</span><span class="kind-tag k-${p.kind ?? "fiche"}" title="${SHEET_KINDS[p.kind ?? "fiche"].label}">${SHEET_KINDS[p.kind ?? "fiche"].prefix}</span><span class="nm">${esc(p.name)}</span><span class="badge">${(p.sections ?? 1) > 1 ? `✂${p.sections}` : ""}${p.master ? " ▤" : ""}</span></li>`).join("")}</ol>
-    <div class="panel-head sub"><h3>Gabarits</h3>
-      <button data-a="m-charte" title="Copier le modèle de la charte dans chaque calque de page (1re feuille, feuille d'atelier, ressource, synthèse, évaluation selon le nom du calque : P01, R01, S01, E01…)">＋ Charte</button>
-      <button data-a="m-atelier" title="Nouveau gabarit « Atelier » (barres haut et bas)">＋ Atelier</button>
-      <button data-a="m-empty" title="Nouveau gabarit vide">＋</button></div>
-    <ul class="page-list">${ms.map((m) => `<li class="${store.editingMaster === m.id ? "on" : ""}" data-m="${m.id}"><span class="num">▤</span><span class="nm">${esc(m.name)}</span>
-      <span class="badge">${store.doc.pages.filter((p) => p.master === m.id).length} f.</span><button data-a="m-del" title="Supprimer le gabarit">✕</button></li>`).join("") || `<li class="empty">Aucun gabarit : les barres du haut et du bas d'un gabarit s'ajoutent à chaque feuille.</li>`}</ul>`;
+`;
   el.querySelectorAll<HTMLElement>("li[data-i]").forEach((li) => {
     li.onclick = () => goPage(+li.dataset.i!);
     li.ondblclick = () => {
       const p = store.doc.pages[+li.dataset.i!];
       const name = prompt("Nom de la feuille (sert aussi à nommer les PDF)", p.name);
       if (name) store.commit(() => { p.name = name; });
-    };
-  });
-  el.querySelectorAll<HTMLElement>("li[data-m]").forEach((li) => {
-    li.onclick = (e) => {
-      const id = li.dataset.m!;
-      if ((e.target as HTMLElement).dataset.a === "m-del") {
-        const m = ms.find((x) => x.id === id)!;
-        if (!confirm(`Supprimer le gabarit « ${m.name} » ? Les feuilles qui l'utilisent n'auront plus de barres.`)) return;
-        store.commit(() => {
-          store.doc.masters = store.doc.masters.filter((x) => x.id !== id);
-          store.doc.pages.forEach((p) => { if (p.master === id) p.master = null; });
-          if (store.editingMaster === id) store.editingMaster = null;
-        });
-        return;
-      }
-      store.editingMaster = id; store.selection = []; store.scope = null; store.activeLayer = null;
-      store.emit("change");
-    };
-    li.ondblclick = () => {
-      const m = ms.find((x) => x.id === li.dataset.m)!;
-      const name = prompt("Nom du gabarit", m.name);
-      if (name) store.commit(() => { m.name = name; });
     };
   });
   const cur = () => store.doc.pages[store.pageIndex];
@@ -188,23 +161,57 @@ function refreshPages() {
     if (store.doc.pages.length < 2 || !confirm(`Supprimer « ${cur().name} » ?`)) return;
     store.commit(() => { store.doc.pages.splice(store.pageIndex, 1); store.pageIndex = Math.max(0, store.pageIndex - 1); store.selection = []; });
   };
-  const addMaster = (atelier: boolean) => {
-    const p = cur();
-    const r = sectionRects(p)[0];
-    const m = atelier ? atelierMaster(r.w, r.h) : emptyMaster(r.w, r.h);
-    store.commit(() => {
-      store.doc.masters.push(m);
-      // appliqué aux feuilles sans gabarit, sauf celles qui portent plusieurs feuilles en calques
-      // (fichiers Affinity P01, R01… : le gabarit passerait sous chacun des calques)
-      store.doc.pages.forEach((x) => { if (!x.master && x.layers.length <= 1) x.master = m.id; });
-    });
-  };
-  el.querySelector<HTMLElement>('[data-a="m-atelier"]')!.onclick = () => addMaster(true);
-  el.querySelector<HTMLElement>('[data-a="m-charte"]')!.onclick = () => copyCharteToLayers();
-  el.querySelector<HTMLElement>('[data-a="m-empty"]')!.onclick = () => addMaster(false);
 }
 
 // ------------------------------------------------------------------ calques
+
+/** Maj + clic : sélection de toutes les lignes entre le dernier clic et celle-ci. Un calque replié
+ *  dans l'intervalle apporte son contenu ; un calque déplié est couvert par ses lignes. */
+let rangeAnchor: string | null = null;
+function selectRange(el: HTMLElement, from: string, to: string) {
+  const rows = [...el.querySelectorAll<HTMLElement>("li[data-id]")];
+  let a = rows.findIndex((r) => r.dataset.id === from), b = rows.findIndex((r) => r.dataset.id === to);
+  if (a < 0) a = b;
+  if (a > b) [a, b] = [b, a];
+  const ids: string[] = [];
+  for (const r of rows.slice(a, b + 1)) {
+    const rid = r.dataset.id!;
+    const layer = store.page.layers.find((l) => l.id === rid);
+    if (layer) { if (!expanded.has(rid)) ids.push(...layer.children.filter((c) => !c.locked).map((c) => c.id)); }
+    else if (!store.find(rid)?.node.locked) ids.push(rid);
+  }
+  // un élément et son groupe parent ne doivent pas être pris tous les deux
+  const set = new Set(ids);
+  const keep = ids.filter((id) => { let f = store.find(id); while (f && !store.page.layers.includes(f.parent)) { if (set.has(f.parent.id)) return false; f = store.find(f.parent.id); } return true; });
+  store.scope = null;
+  store.select([...new Set(keep)]);
+}
+
+/** Indicateur de compétences à droite du nom : points de couleur si le panneau est étroit,
+ *  pastilles avec les codes s'il est assez large (requête de conteneur dans style.css). */
+function compIndicator(codes: string[]) {
+  const tip = codes.map((c) => `${c} – ${subByCode(c)?.title ?? ""}`).join("\n");
+  return `<span class="comp-ind" title="${esc(tip)}">
+    <span class="comp-dots">${codes.slice(0, 5).map((c) => `<i style="background:${themeColor(c)}"></i>`).join("")}${codes.length > 5 ? "+" : ""}</span>
+    <span class="comp-chips">${codes.slice(0, 3).map((c) => `<button class="comp-chip" data-iso="${c}" style="--th:${themeColor(c)}" title="${esc(subByCode(c)?.title ?? c)} — cliquer pour isoler">${c}</button>`).join("")}${codes.length > 3 ? `<small>+${codes.length - 3}</small>` : ""}</span></span>`;
+}
+
+/** Pastilles de compétences réelles (imprimées) : groupe « …_Comp » dans le calque, à x = 8,
+ *  à hauteur du haut de l'élément, une sous l'autre. Remplace un groupe _Comp existant du même élément. */
+function placeCompPills(node: SceneNode, isLayer: boolean) {
+  const b = nodeBoxOf(node.id);
+  if (!b || !node.comp?.length) return;
+  const layer = isLayer && node.type === "group" ? node : store.page.layers.find((l) => { let hit = false; walk([l], (x) => { if (x.id === node.id) hit = true; }); return hit; });
+  if (!layer || layer.type !== "group") return;
+  const name = `${node.name}_Comp`;
+  const pills = node.comp.map((c, i) => { const p = competencePill(c, subByCode(c)?.title ?? ""); p.transform = [1, 0, 0, 1, 8, b.y + i * 50]; return p; });
+  const g = newGroup(pills, name);
+  g.transform = mulM(inv(store.cumulative(layer)), g.transform);
+  store.commit(() => {
+    layer.children = layer.children.filter((c) => c.name !== name);
+    layer.children.push(g);
+  });
+}
 
 /** Menu contextuel d'un calque ou d'un objet du panneau Calques. */
 function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
@@ -215,7 +222,10 @@ function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
   const tpl = isLayer && g ? g.children.find((c) => c.name.startsWith(TEMPLATE_PREFIX)) : undefined;
   const kind = isLayer && g ? kindOfLayer(g, store.page) : "fiche";
   m.innerHTML = `<button data-m="zoom">Zoom au plus près</button>
+    <button data-m="iso">${isIsolated() ? "Quitter la vue isolée" : "Isoler (vue dédiée)"} <small>touche I</small></button>
     ${g ? `<button data-m="selall">Sélectionner le contenu</button>` : ""}
+    <button data-m="comp">Compétences…${node.comp?.length ? ` <small>${esc(node.comp.join(", "))}</small>` : ""}</button>
+    ${node.comp?.length ? `<button data-m="comppills">Poser les pastilles sur la feuille<small>objets imprimés, empilés dans la marge (groupe _Comp)</small></button>` : ""}
     <button data-m="rename">Renommer…</button>
     <button data-m="eye">${node.visible ? "Masquer" : "Afficher"}</button>
     <button data-m="lock">${node.locked ? "Déverrouiller" : "Verrouiller"}</button>
@@ -233,6 +243,9 @@ function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
     close();
     const a = b.dataset.m;
     if (a === "zoom") frameNode(node.id);
+    else if (a === "iso") { if (isIsolated()) exitIsolation(); else enterIsolation(store.selection.includes(node.id) ? store.selection : [node.id]); }
+    else if (a === "comp") compPicker(node);
+    else if (a === "comppills") placeCompPills(node, isLayer);
     else if (a === "selall" && g) {
       if (isLayer) { store.activeLayer = g.id; store.scope = null; }
       store.select(g.children.filter((c) => !c.locked && c.visible).map((c) => c.id));
@@ -280,7 +293,9 @@ function refreshLayers() {
   const sel = new Set(store.selection);
   const active = store.layer().id;
   const rows: string[] = [];
+  const keep = currentIsolation();
   const row = (n: SceneNode, depth: number, isLayer: boolean) => {
+    if (keep && !keep.has(n.id)) return; // compétence isolée : on n'affiche que ses calques
     const kids = n.type === "group" ? [...n.children].reverse() : [];
     const hasKids = kids.length > 0 || (n.type === "group" && !!n.mask);
     rows.push(`<li class="${sel.has(n.id) ? "sel" : ""} ${isLayer ? "layer" : ""} ${isLayer && n.id === active ? "active" : ""} ${n.visible ? "" : "hidden"}" data-id="${n.id}" style="--d:${depth};--row-tag:${n.tag ?? "transparent"}">
@@ -289,7 +304,7 @@ function refreshLayers() {
       <button class="lock ${n.locked ? "on" : ""}" data-a="lock" title="${n.locked ? "Déverrouiller" : "Verrouiller"} (glisser pour plusieurs)">${n.locked ? LOCK_ON : LOCK_OFF}</button>
       ${isLayer || n.type === "group" ? `<button class="tag" data-a="tag" title="Couleur du calque / groupe" style="--tag:${n.tag ?? "transparent"}"></button>` : ""}
       <span class="ic">${isLayer ? (n.type === "group" && n.anchor && n.anchor !== "none" ? (n.anchor === "top" ? "⤒" : "⤓") : "≡") : n.type === "group" && n.mask ? "◐" : ICON[n.type]}</span>
-      <span class="nm">${esc(n.name || "")}</span>${n.step ? STEP_ICON : ""}</li>`);
+      <span class="nm">${esc(n.name || "")}</span>${n.step ? STEP_ICON : ""}${n.comp?.length ? compIndicator(n.comp) : ""}</li>`);
     if (hasKids && expanded.has(n.id)) {
       for (const k of kids) row(k, depth + 1, false);
       if (n.type === "group" && n.mask) row(n.mask, depth + 1, false);
@@ -303,7 +318,12 @@ function refreshLayers() {
       <button data-a="down" title="Descendre">▼</button>
       <button data-a="dellayer" title="Supprimer le calque actif">🗑</button></div>
     <ul class="tree">${rows.join("")}</ul>`;
-  el.querySelectorAll<HTMLElement>("li").forEach((li) => {
+  // pastilles de compétences à droite du nom : un clic isole la compétence (sans sélectionner la ligne)
+  el.querySelectorAll<HTMLElement>("li .comp-chip").forEach((b) => (b.onclick = (e) => {
+    e.stopPropagation();
+    setIsolated(isolated === b.dataset.iso ? null : b.dataset.iso!);
+  }));
+  el.querySelectorAll<HTMLElement>("li[data-id]").forEach((li) => {
     const id = li.dataset.id!;
     const isLayer = li.classList.contains("layer");
     li.querySelectorAll<HTMLElement>('[data-a="eye"], [data-a="lock"]').forEach((btn) => {
@@ -331,10 +351,18 @@ function refreshLayers() {
       if (a === "tw") { expanded.has(id) ? expanded.delete(id) : expanded.add(id); refreshLayers(); return; }
       if (a === "eye" || a === "lock") return; // géré à l'appui (voir onmousedown)
       if (a === "tag") { tagPicker(e.target as HTMLElement, node.tag ?? null, (c) => store.commit(() => { node.tag = c; })); return; }
-      if (isLayer) { store.activeLayer = id; store.selection = []; store.emit("selection"); refreshLayers(); return; }
+      if (e.shiftKey && rangeAnchor && rangeAnchor !== id) { selectRange(el, rangeAnchor, id); return; }
+      if (isLayer) { rangeAnchor = id; store.activeLayer = id; store.selection = []; store.emit("selection"); refreshLayers(); return; }
       const f = store.find(id);
-      store.scope = f && !store.page.layers.includes(f.parent) ? f.parent.id : null;
-      store.select(e.shiftKey ? [...new Set([...store.selection, id])] : [id]);
+      if (e.metaKey || e.ctrlKey) {
+        // ⌘/Ctrl + clic : ajouter ou retirer un élément
+        store.scope = null;
+        store.select(store.selection.includes(id) ? store.selection.filter((x) => x !== id) : [...store.selection, id]);
+      } else {
+        store.scope = f && !store.page.layers.includes(f.parent) ? f.parent.id : null;
+        store.select([id]);
+      }
+      rangeAnchor = id;
     };
     li.ondblclick = (e) => {
       const node = isLayer ? store.page.layers.find((l) => l.id === id)! : store.find(id)?.node;
@@ -433,6 +461,7 @@ function insertItem(item: LibItem) {
       layer.children.push(n);
       ids.push(n.id);
     }
+    store.isoAdd(ids);
     store.selection = ids;
   });
 }
@@ -559,7 +588,8 @@ function refreshProps() {
     <div class="grid2">${field("X (mm)", "x", n1(toMm(b.x)))}${field("Y (mm)", "y", n1(toMm(b.y)))}
     ${field("L (mm)", "w", n1(toMm(b.w)))}${field("H (mm)", "h", n1(toMm(b.h)))}
     ${one ? field("Rotation (°)", "rot", n1(rot)) : ""}${field("Opacité (%)", "op", String(Math.round((one?.opacity ?? 1) * 100)))}</div>
-    <label class="chk" title="En présentation, l'objet est masqué au départ puis révélé pas à pas (→ ou Espace)"><input type="checkbox" data-k="step" ${nodes.every((n) => n.step) ? "checked" : ""}> Étape de correction (présentation)</label></section>`);
+    <label class="chk" title="En présentation, l'objet est masqué au départ puis révélé pas à pas (→ ou Espace)"><input type="checkbox" data-k="step" ${nodes.every((n) => n.step) ? "checked" : ""}> Étape de correction (présentation)</label>
+    ${one ? `<div class="comp-line"><span>Compétences</span>${one.comp?.length ? one.comp.map((c) => `<span class="code" style="background:${themeColor(c)}">${c}</span>`).join("") : `<small>aucune</small>`}<button data-act="comp">Choisir…</button></div>` : ""}</section>`);
   if (vec.length) {
     const v = vec[0];
     const dashKind = !v.stroke.dash ? "solid" : v.stroke.dash[0] < 0.5 ? "dot" : "dash";
@@ -612,7 +642,8 @@ function refreshProps() {
     <div class="btnrow"><button data-act="dist-h" title="Répartir horizontalement">⇹</button><button data-act="dist-v" title="Répartir verticalement">⇳</button>
       <span class="sep"></span><button data-act="front" title="Premier plan">⤒</button><button data-act="up" title="Avancer">↑</button><button data-act="down" title="Reculer">↓</button><button data-act="back" title="Arrière-plan">⤓</button></div>
     <div class="btnrow wrap"><button data-act="group">Grouper</button><button data-act="ungroup">Dissocier</button><button data-act="mask" title="La forme du dessus découpe les autres">Masquer</button>
-      <button data-act="dup">Dupliquer</button><button data-act="del">Supprimer</button></div>
+      <button data-act="dup">Dupliquer</button><button data-act="del">Supprimer</button>
+      <button data-act="isolate" title="Travailler sur la sélection seule, puis revenir à la vue complète au même endroit (I)">${isIsolated() ? "◎ Quitter la vue isolée" : "◎ Isoler"}</button></div>
     <p class="hint">${nodes.length === 1 ? "Un seul objet : alignement sur la page." : "Plusieurs objets : alignement sur la sélection."}</p></section>`);
   el.innerHTML = parts.join("");
   bindProps(el, nodes, b);
@@ -648,6 +679,7 @@ function fitThumbs(root: HTMLElement) {
 }
 
 let pickLevel = ""; // classe choisie dans la fenêtre Modèles ("" = niveau du document)
+let tplSection = ""; // rubrique affichée dans la fenêtre Modèles ("" = tout)
 
 /** Barre d'outils › Modèles : modèles de page à copier dans le calque actif, titres et blocs de la charte. */
 export function templatePicker(anchor: HTMLElement) {
@@ -659,26 +691,35 @@ export function templatePicker(anchor: HTMLElement) {
   const kind = kindOfLayer(layer, store.page);
   const current = layer.children.find((c) => c.name.startsWith(TEMPLATE_PREFIX))?.name;
   const all = builtinItems(variantOf(store.doc));
-  const items = all.filter((it) => it.name.startsWith("Charte · ") || it.name === "Pastille de niveau");
-  const headings = items.filter((it) => /titre de niveau/.test(it.name));
-  const blocks = items.filter((it) => !/titre de niveau/.test(it.name));
+  const charteItems = all.filter((it) => it.name.startsWith("Charte · ") || it.name === "Pastille de niveau");
+  const headings = charteItems.filter((it) => /titre de niveau/.test(it.name));
+  const blocks = charteItems.filter((it) => !/titre de niveau/.test(it.name));
+  const general = all.filter((it) => !charteItems.includes(it));
+  const items = [...all, ...userLib]; // tout ce qu'on peut insérer depuis cette fenêtre
   const card = (cls: string, attr: string, svg: string, label: string, on = false) =>
     `<button class="tpl-card ${cls} ${on ? "on" : ""}" ${attr} title="${esc(label)}">${svg}<span>${esc(label)}</span></button>`;
   // classe choisie : "" = pastille liée au niveau du document, sinon pastille figée sur la classe
   const lv = (nodes: SceneNode[]) => (pickLevel ? fixLevel(nodes, pickLevel) : nodes);
   const docLevel = store.doc.fields.niveau ?? "";
   const isOn = (t: string) => !!current && (current === TEMPLATE_PREFIX + t || current.startsWith(`${TEMPLATE_PREFIX}${t} · `));
-  m.innerHTML = `<div class="tpl-head"><b>Modèles de la charte</b><span class="spacer"></span><input type="search" placeholder="Filtrer…" class="tpl-filter"></div>
+  const sec = (id: string, title: string, body: string) => `<section class="tpl-sec" data-sec="${id}" ${tplSection && tplSection !== id ? "hidden" : ""}>${title}${body}</section>`;
+  m.innerHTML = `<div class="tpl-head"><b>Modèles et blocs</b><span class="spacer"></span><input type="search" placeholder="Filtrer…" class="tpl-filter"></div>
+    <div class="tpl-tabs">${([["", "Tout"], ["pages", "Pages"], ["titres", "Titres"], ["charte", "Blocs de la charte"], ["general", "Blocs généraux"], ["mine", `Mes blocs (${userLib.length})`]] as const).map(([k, l]) => `<button data-sec-btn="${k}" class="${tplSection === k ? "on" : ""}">${l}</button>`).join("")}</div>
     <div class="tpl-levels"><span>Classe :</span>
       <button data-lv="" class="${pickLevel ? "" : "on"}" title="La pastille suit le niveau réglé dans Document">Document${docLevel ? ` (${esc(docLevel)}e)` : ""}</button>
       ${LEVELS.map((l) => `<button data-lv="${l}" class="${pickLevel === l ? "on" : ""}" style="--lv:${DEFAULT_LEVEL_COLORS[l]}"><i></i>${l}e</button>`).join("")}</div>
     <div class="tpl-scroll">
-    <div class="menu-title">Modèle de page → calque « ${esc(layer.name)} »${current ? " (remplace le modèle en place)" : ""}</div>
-    <div class="tpl-grid pages">${masters.map((ms, i) => card("page", `data-tpl="${i}"`, thumb(lv(ms.layers.flatMap((l) => l.children)), { w: ms.width, h: ms.height }), `${TEMPLATES[i]}${pickLevel ? ` · ${pickLevel}e` : ""}`, isOn(TEMPLATES[i]) || (!current && i === templateFor(kind)))).join("")}</div>
-    <div class="menu-title">Titres · ${esc(variantOf(store.doc).label)}</div>
-    <div class="tpl-grid">${headings.map((it) => card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name.replace(/^Charte · /, ""))).join("")}</div>
-    <div class="menu-title">Blocs</div>
-    <div class="tpl-grid">${blocks.map((it) => card("block", `data-it="${it.id}"`, thumb(lv(structuredClone(it.nodes))), it.name.replace(/^Charte · /, "") + (pickLevel && it.name === "Pastille de niveau" ? ` · ${pickLevel}e` : ""))).join("")}</div>
+    ${sec("pages", `<div class="menu-title">Modèle de page → calque « ${esc(layer.name)} »${current ? " (remplace le modèle en place)" : ""}</div>`,
+      `<div class="tpl-grid pages">${masters.map((ms, i) => card("page", `data-tpl="${i}"`, thumb(lv(ms.layers.flatMap((l) => l.children)), { w: ms.width, h: ms.height }), `${TEMPLATES[i]}${pickLevel ? ` · ${pickLevel}e` : ""}`, isOn(TEMPLATES[i]) || (!current && i === templateFor(kind)))).join("")}</div>`)}
+    ${sec("titres", `<div class="menu-title">Titres · ${esc(variantOf(store.doc).label)}</div>`,
+      `<div class="tpl-grid">${headings.map((it) => card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name.replace(/^Charte · /, ""))).join("")}</div>`)}
+    ${sec("charte", `<div class="menu-title">Blocs de la charte</div>`,
+      `<div class="tpl-grid">${blocks.map((it) => card("block", `data-it="${it.id}"`, thumb(lv(structuredClone(it.nodes))), it.name.replace(/^Charte · /, "") + (pickLevel && it.name === "Pastille de niveau" ? ` · ${pickLevel}e` : ""))).join("")}</div>`)}
+    ${sec("general", `<div class="menu-title">Blocs généraux</div>`,
+      `<div class="tpl-grid">${general.map((it) => card("block", `data-it="${it.id}"`, thumb(lv(structuredClone(it.nodes))), it.name)).join("")}</div>`)}
+    ${sec("mine", `<div class="menu-title">Mes blocs <span class="tpl-save"><button data-save="objects" title="Enregistrer les objets sélectionnés comme bloc réutilisable">＋ Sélection</button><button data-save="layer" title="Enregistrer le calque actif comme modèle">＋ Calque actif</button></span></div>`,
+      userLib.length ? `<div class="tpl-grid">${userLib.map((it) => `<div class="tpl-mine">${card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name)}<button class="tpl-del" data-del="${it.id}" title="Retirer de mes blocs">✕</button></div>`).join("")}</div>`
+        : `<p class="hint">Sélectionnez des objets sur la feuille puis « ＋ Sélection » pour les réutiliser dans tous vos documents (gardés dans ce navigateur).</p>`)}
     </div>`;
   const r = anchor.getBoundingClientRect();
   m.style.left = `${r.right + 6}px`;
@@ -695,7 +736,25 @@ export function templatePicker(anchor: HTMLElement) {
     m.querySelectorAll<HTMLElement>(".tpl-card").forEach((c) => { c.hidden = !!q && !c.title.toLowerCase().includes(q); });
   };
   filter.focus();
-  m.onclick = (e) => {
+  m.onclick = async (e) => {
+    const t = e.target as HTMLElement;
+    const secBtn = t.closest<HTMLElement>("[data-sec-btn]");
+    if (secBtn) {
+      tplSection = secBtn.dataset.secBtn!;
+      m.querySelectorAll<HTMLElement>("[data-sec-btn]").forEach((b) => b.classList.toggle("on", b === secBtn));
+      m.querySelectorAll<HTMLElement>(".tpl-sec").forEach((s) => { s.hidden = !!tplSection && s.dataset.sec !== tplSection; });
+      requestAnimationFrame(() => fitThumbs(m));
+      return;
+    }
+    const save = t.closest<HTMLElement>("[data-save]");
+    if (save) { close(); await saveSelectionToLibrary(save.dataset.save as "objects" | "layer"); tplSection = "mine"; templatePicker(anchor); return; }
+    const del = t.closest<HTMLElement>("[data-del]");
+    if (del) {
+      const it = userLib.find((x) => x.id === del.dataset.del);
+      if (!it || !confirm(`Retirer « ${it.name} » de vos blocs ?`)) return;
+      await deleteItem(it.id); userLib = await userItems();
+      close(); templatePicker(anchor); return;
+    }
     const lvBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-lv]");
     if (lvBtn) {
       // nouvelle classe : on reconstruit la fenêtre avec les aperçus de cette classe
@@ -895,6 +954,8 @@ function bindProps(el: HTMLElement, nodes: SceneNode[], b: Box) {
         underline: () => { if (!styleCommand("underline")) applyToRuns((r) => { r.underline = !r.underline; }); },
       };
       if (textActs[a]) return textActs[a]();
+      if (a === "comp") { const n0 = store.selected()[0]; if (n0) compPicker(n0); return; }
+      if (a === "isolate") { if (isIsolated()) exitIsolation(); else enterIsolation(store.selection); return; }
       if (a.startsWith("al-")) {
         const al = a.slice(3) as "left";
         if (!styleCommand("align", al)) store.commit(() => { for (const n of store.selected()) walk([n], (x) => { if (x.type === "text") x.paragraphs.forEach((p) => { p.align = al; }); }); });
@@ -927,7 +988,8 @@ function docProps() {
       <button class="primary" data-m="done">Terminer la modification du gabarit</button></section>${varsHelp()}`;
   }
   const p = store.page;
-  const levels = Object.keys(d.levelColors);
+  // cycle 4 : 5e, 4e, 3e (la 6e reste proposée seulement si le document l'utilise déjà)
+  const levels = Object.keys(d.levelColors).filter((l) => l !== "6" || d.fields.niveau === "6");
   return `<section><h4>Document</h4>
     <label class="fld wide"><span>Nom du document</span><input data-d="name" value="${esc(d.name)}"></label>
     <div class="grid2"><label class="fld"><span>Atelier {{atelier}}</span><input data-f="atelier" value="${esc(d.fields.atelier ?? "")}"></label>

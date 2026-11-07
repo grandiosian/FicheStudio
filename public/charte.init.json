@@ -28,7 +28,7 @@
     "evalres": "#ff8c00"
   },
   "competences": { "T1": "#28aa46", "T2": "#e65096", "T3": "#f5a51e" },
-  "niveaux": { "6": "#e94e77", "5": "#30c700", "4": "#fcca30", "3": "#d82834" },
+  "niveaux": { "5": "#30c700", "4": "#fcca30", "3": "#d82834" },
   "bandeaux": { "enteteRayonMm": 8, "resumeRayonMm": 1, "ressourceRayonMm": 1 },
   "decoupe": { "couleur": "#2f57a1", "epaisseur": 12 }
 }

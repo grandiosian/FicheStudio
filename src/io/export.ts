@@ -15,8 +15,9 @@ export function download(name: string, data: BlobPart, mime: string) {
 
 const safe = (s: string) => s.replace(/[\\/:*?"<>|]+/g, "_").trim() || "document";
 
+/** Format natif : extension .fstudio (contenu JSON). Les anciens .fiche.json s'ouvrent toujours. */
 export function saveNative(doc: Doc) {
-  download(`${safe(doc.name)}.fiche.json`, JSON.stringify(doc), "application/json");
+  download(`${safe(doc.name)}.fstudio`, JSON.stringify(doc), "application/x-fstudio");
 }
 
 export function parseNative(text: string): Doc {

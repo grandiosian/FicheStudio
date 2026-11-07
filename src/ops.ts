@@ -75,6 +75,7 @@ export function paste(offset = 30) {
       layer.children.push(c);
       ids.push(c.id);
     });
+    store.isoAdd(ids);
     store.selection = ids;
   });
 }
@@ -112,6 +113,7 @@ export function ungroupSelection() {
       const i = f.parent.children.indexOf(g);
       f.parent.children.splice(i, 1, ...kids);
     }
+    store.isoAdd(ids); // vue isolée : les éléments du groupe dissocié restent visibles
     store.selection = ids;
   });
 }
@@ -215,5 +217,6 @@ export function addToLayer(n: SceneNode) {
   store.commit(() => {
     layer.children.push(n);
     store.selection = [n.id];
+    store.isoAdd([n.id]); // vue isolée : le nouvel objet reste visible
   });
 }

@@ -1,10 +1,13 @@
 import "./style.css";
 import { store, loadLocal, type Tool } from "./store";
+import { enterIsolation, exitIsolation, isIsolated } from "./canvas";
 import { initCanvas, setTool, zoomBy, zoomToFit, zoomToWidth, view, cancelInteraction, deleteActiveAnchor, insertImageNode, isTyping, finishPen } from "./canvas";
 import { loadCharteInit, prefsDialog } from "./prefs";
 import { hasCharteMasters, updateCharteMasters } from "./charte";
+import { openPresentSpace, initPresentSpace } from "./presentspace";
+import { docBrowser } from "./docbrowser";
 import { showCharte, checkCharteDialog, variantDialog } from "./charteview";
-import { initPanels, refreshCompetencesPanel, tablePicker, templatePicker } from "./panels";
+import { initPanels, refreshCompetencesPanel, tablePicker, templatePicker, copyCharteToLayers } from "./panels";
 import { closeTextEditor, isEditingText, openTextEditor } from "./textedit";
 import { copySelection, deleteSelection, duplicate, groupSelection, moveSelection, paste, ungroupSelection } from "./ops";
 import { newDoc, newImage, uid } from "./model";
@@ -22,23 +25,35 @@ const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySele
 
 // ------------------------------------------------------------------ outils
 
-const TOOLS: [Tool, string, string, string][] = [
-  ["select", "V", "Sélection", "M4 2l14 9-6 1.5 3.5 7-2.6 1.3-3.5-7L4 18z"],
-  ["node", "A", "Nœuds", "M5 3l13 8-6 1 3 6-2 1-3-6-5 4z M3 19h4v2H3z"],
-  ["pen", "P", "Plume", "M12 2l6 10-6 10-6-10z M12 8v6 M3 22h18"],
-  ["rect", "M", "Rectangle", "M4 5h16v14H4z"],
-  ["ellipse", "E", "Ellipse", "M12 5c5 0 9 3 9 7s-4 7-9 7-9-3-9-7 4-7 9-7z"],
-  ["line", "L", "Ligne", "M4 20L20 4"],
-  ["text", "T", "Texte", "M5 5h14v3M12 5v14M9 19h6"],
-  ["hand", "H", "Main", "M8 13V5a1.5 1.5 0 013 0v6-8a1.5 1.5 0 013 0v8-6a1.5 1.5 0 013 0v9c0 4-3 7-6.5 7S7 18 5 15l-2-3a1.5 1.5 0 012.5-1.5z"],
+// Barre d'outils : groupes séparés (sélection · dessin · texte · insertion), icônes au trait de 24 px
+type TBItem = { tool?: Tool; cmd?: string; key?: string; label: string; d: string };
+const TOOL_GROUPS: { name: string; items: TBItem[] }[] = [
+  { name: "Sélection", items: [
+    { tool: "select", key: "V", label: "Sélection", d: "M5.5 3.5 18 10.6l-5.4 1.5-3.1 5.6z M12.6 12.1l4.6 4.6" },
+    { tool: "node", key: "A", label: "Nœuds (modifier les points)", d: "M5 3.5 15.5 9.3l-4.5 1.3-2.6 4.6z M14.5 14.5h5v5h-5z M5 20.5h0" },
+    { tool: "hand", key: "H", label: "Main (déplacer la vue)", d: "M8 12.5V6a1.4 1.4 0 0 1 2.8 0v5 M10.8 10.5V4.6a1.4 1.4 0 0 1 2.8 0v5.9 M13.6 10.5V5.8a1.4 1.4 0 0 1 2.8 0v5.7 M16.4 11.5V8.6a1.4 1.4 0 0 1 2.8 0V14c0 4-2.8 7-6.6 7-2.6 0-4.2-1.2-5.6-3.3L4.6 14a1.5 1.5 0 0 1 2.4-1.8l1 1.3" },
+  ] },
+  { name: "Dessin", items: [
+    { tool: "pen", key: "P", label: "Plume (courbes)", d: "M12 3.5 17 12l-5 8.5L7 12z M12 3.5v7 M12 12.6a1.1 1.1 0 1 0 0 .01 M4 21h16" },
+    { tool: "line", key: "L", label: "Ligne", d: "M5.5 18.5 18.5 5.5 M5.5 18.5m-1.6 0a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0-3.2 0 M18.5 5.5m-1.6 0a1.6 1.6 0 1 0 3.2 0a1.6 1.6 0 1 0-3.2 0" },
+    { tool: "rect", key: "M", label: "Rectangle", d: "M6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9A2.5 2.5 0 0 1 6.5 5z" },
+    { tool: "ellipse", key: "E", label: "Ellipse", d: "M12 5c4.7 0 8.5 3.1 8.5 7s-3.8 7-8.5 7-8.5-3.1-8.5-7 3.8-7 8.5-7z" },
+  ] },
+  { name: "Texte", items: [
+    { tool: "text", key: "T", label: "Texte", d: "M5 7V4.5h14V7 M12 4.5v15 M9 19.5h6" },
+  ] },
+  { name: "Insertion", items: [
+    { cmd: "templates", label: "Modèles et blocs de la charte", d: "M5 4h14a1 1 0 0 1 1 1v3.5H4V5a1 1 0 0 1 1-1z M4 11.5h7.5V20H5a1 1 0 0 1-1-1z M14.5 11.5H20V19a1 1 0 0 1-1 1h-4.5z" },
+    { cmd: "table", label: "Tableau à la charte", d: "M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z M4 9.5h16 M4 14.5h16 M9.5 4.5v15 M14.5 4.5v15" },
+    { cmd: "image", label: "Image", d: "M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z M4 16l4.5-4.5 4 4 2.5-2.5 5 5 M15.5 9a1.5 1.5 0 1 0 0 .01" },
+  ] },
 ];
 
 function buildToolbar() {
   const tb = $("#toolbar");
-  tb.innerHTML = TOOLS.map(([t, k, label, d]) => `<button data-tool="${t}" title="${label} (${k})"><svg viewBox="0 0 24 24"><path d="${d}"/></svg></button>`).join("")
-    + `<button data-cmd="templates" title="Modèles et blocs de la charte (aperçus)"><svg viewBox="0 0 24 24"><path d="M4 3h16v5H4z M4 11h7v10H4z M14 11h6v4h-6z M14 18h6v3h-6z"/></svg></button>`
-    + `<button data-cmd="table" title="Insérer un tableau à la charte"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3z M3 9h18 M3 14.5h18 M9 4v16 M15 4v16"/></svg></button>`
-    + `<button data-cmd="image" title="Insérer une image"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6 M15 9a1.5 1.5 0 100-.01"/></svg></button>`;
+  const btn = (it: TBItem) => `<button ${it.tool ? `data-tool="${it.tool}"` : `data-cmd="${it.cmd}"`} title="${it.label}${it.key ? ` — ${it.key}` : ""}" aria-label="${it.label}">
+    <svg viewBox="0 0 24 24"><path d="${it.d}"/></svg>${it.key ? `<span class="k">${it.key}</span>` : ""}</button>`;
+  tb.innerHTML = TOOL_GROUPS.map((g) => `<div class="tb-group" role="group" aria-label="${g.name}">${g.items.map(btn).join("")}</div>`).join(`<div class="tb-sep"></div>`);
   tb.querySelectorAll<HTMLElement>("[data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool as Tool)));
   tb.querySelector<HTMLElement>('[data-cmd="image"]')!.onclick = (e) => imageMenu(e.currentTarget as HTMLElement);
   tb.querySelector<HTMLElement>('[data-cmd="templates"]')!.onclick = (e) => templatePicker(e.currentTarget as HTMLElement);
@@ -218,9 +233,10 @@ const previewVars = () => (store.previewRow !== null ? store.doc.data.rows[store
 
 const ACTIONS: Record<string, () => void | Promise<void>> = {
   new: () => { closeTextEditor(); store.openTab(newDoc()); },
-  open: async () => { const f = await pickFile(".af,.afdesign,.afpub,.afphoto,.json,.fiche"); if (f) await openFile(f); },
+  open: async () => { const f = await pickFile(".fstudio,.af,.afdesign,.afpub,.afphoto,.json,.fiche"); if (f) await openFile(f); },
   save: () => { saveNative(store.doc); store.markSaved(); },
   pdf: () => pdfDialog(),
+  pdfseries: () => pdfDialog(true),
   print: () => printPdf(store.doc, [previewVars()]),
   svg: () => exportSvg(store.doc, store.pageIndex, previewVars()),
   affinity: async () => {
@@ -230,10 +246,13 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
     status("Script Affinity téléchargé : exécutez-le dans Affinity pour obtenir un .af natif.");
   },
   present: () => { closeTextEditor(); store.editingMaster = null; startPresentation(); },
+  presentmenu: () => { closeTextEditor(); store.editingMaster = null; openPresentSpace(); },
+  docs: () => docBrowser(openFile),
   l2p: () => { if (!store.editingMaster) layerPagesDialog((msg) => status(msg)); },
   charte: () => showCharte(),
   chartecheck: () => checkCharteDialog(),
   chartevariant: () => variantDialog(),
+  chartecopy: () => copyCharteToLayers(),
   charteprefs: () => prefsDialog((update) => {
     if (update && hasCharteMasters(store.doc)) store.commit(() => { updateCharteMasters(store.doc); }, "doc");
   }),
@@ -287,7 +306,7 @@ function buildTopbar() {
       if (x !== undefined) {
         const i = +x;
         const name = store.tabs[i]?.doc.name ?? "";
-        if (store.isDirty(i) && !confirm(`Fermer « ${name} » ? Les modifications non enregistrées en .fiche.json seront perdues.`)) return;
+        if (store.isDirty(i) && !confirm(`Fermer « ${name} » ? Les modifications non enregistrées (fichier .fstudio) seront perdues.`)) return;
         store.closeTab(i);
       } else store.switchTab(+t.dataset.i!);
     }));
@@ -354,6 +373,7 @@ function onKey(e: KeyboardEvent) {
   if (mod) return;
   if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); if (!deleteActiveAnchor()) deleteSelection(); return; }
   if (e.key === "Escape") {
+    if (isIsolated() && !store.selection.length && !cancelInteraction()) { exitIsolation(); return; }
     if (!cancelInteraction()) {
       if (!store.selection.length && store.editingMaster) { store.editingMaster = null; store.emit("change"); }
       else store.select([]);
@@ -367,6 +387,12 @@ function onKey(e: KeyboardEvent) {
     if (n?.type === "text") { e.preventDefault(); openTextEditor(n.id); }
     return;
   }
+  // I : vue isolée de la sélection (ou du calque actif), I à nouveau pour revenir à la vue complète
+  if (k === "i" && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    if (isIsolated()) exitIsolation(); else enterIsolation(store.selection.length ? store.selection : [store.layer().id]);
+    return;
+  }
   const arrows: Record<string, [number, number]> = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] };
   if (arrows[k]) {
     e.preventDefault();
@@ -374,8 +400,8 @@ function onKey(e: KeyboardEvent) {
     moveSelection(arrows[k][0] * step, arrows[k][1] * step);
     return;
   }
-  const t = TOOLS.find(([, key]) => key.toLowerCase() === k);
-  if (t) setTool(t[0]);
+  const t = TOOL_GROUPS.flatMap((g) => g.items).find((it) => it.tool && it.key?.toLowerCase() === k);
+  if (t?.tool) setTool(t.tool);
 }
 
 // ------------------------------------------------------------------ panneaux redimensionnables
@@ -431,6 +457,7 @@ function initResizers() {
 async function start() {
   buildToolbar();
   buildTopbar();
+  initPresentSpace(openFile);
   await loadCharteInit(); // préférences de la charte avant de créer ou restaurer les documents
   const saved = await loadLocal();
   const docs = (saved?.docs ?? []).filter((d) => d?.format === "fichestudio" && d.pages?.length);
@@ -439,7 +466,7 @@ async function start() {
   initCanvas($("#stage"));
   initPanels();
   window.addEventListener("keydown", onKey);
-  // glisser-déposer : .af, .fiche.json, images
+  // glisser-déposer : .af, .fstudio (ou ancien .fiche.json), images
   const stage = $("#stage");
   stage.addEventListener("dragover", (e) => { e.preventDefault(); stage.classList.add("drop"); });
   stage.addEventListener("dragleave", () => stage.classList.remove("drop"));
@@ -455,11 +482,10 @@ async function start() {
   initResizers();
   document.addEventListener("pdf-dialog", (e) => pdfDialog(!!(e as CustomEvent).detail?.series));
   document.addEventListener("status", (e) => status(String((e as CustomEvent).detail)));
-  // onglets Calques / Bibliothèque
+  // onglets Calques / Compétences (la bibliothèque est dans la fenêtre Modèles)
   document.querySelectorAll<HTMLElement>("#left .tabs button").forEach((b) => (b.onclick = () => {
     document.querySelectorAll<HTMLElement>("#left .tabs button").forEach((x) => x.classList.toggle("on", x === b));
     $("#layers").hidden = b.dataset.tab !== "layers";
-    $("#library").hidden = b.dataset.tab !== "library";
     $("#competences").hidden = b.dataset.tab !== "competences";
     if (b.dataset.tab === "competences") refreshCompetencesPanel();
   }));

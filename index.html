@@ -8,47 +8,61 @@
 </head>
 <body>
   <header id="topbar">
-    <span class="brand">Fiche<b>Studio</b></span>
-    <details class="menu"><summary>Fichier</summary>
-      <div class="menu-body">
-        <button data-act="new">Nouveau</button>
-        <button data-act="open">Ouvrir… <kbd>⌘O</kbd><small>.af, .afdesign, .fiche.json</small></button>
-        <button data-act="save">Enregistrer <kbd>⌘S</kbd><small>format .fiche.json</small></button>
-        <button data-act="l2p">Calques → feuilles…<small>une feuille par calque choisi (pages, ressources)</small></button>
-        <hr />
-        <button data-act="pdf">Exporter en PDF… <kbd>⌘P</kbd><small>un fichier, un par feuille ou par partie ; polices intégrées</small></button>
-        <button data-act="print">Imprimer…<small>impression directe du navigateur</small></button>
-        <button data-act="svg">Exporter la page en SVG</button>
-        <button data-act="affinity">Exporter pour Affinity<small>script qui recrée un .af natif</small></button>
-        <hr />
-        <div class="menu-title">Exemples</div>
-        <div id="samples-list"></div>
-      </div>
-    </details>
-    <details class="menu"><summary>Charte</summary>
-      <div class="menu-body">
-        <button data-act="charte">Consulter la charte graphique<small>couleurs, typographie, mesures des ateliers</small></button>
-        <button data-act="chartevariant">Variantes de disposition…<small>Classique 1.1 · Chapitres I, a · Grille A1, A2… · Mixte 1, a, i</small></button>
-        <button data-act="charteprefs">Préférences (fichier init)…<small>couleurs, étiquettes, compétences, rayons des bandeaux, variante par défaut</small></button>
-        <button data-act="chartecheck">Vérifier le document<small>découpes, types de feuilles, pastilles de niveau</small></button>
-        <p class="hint">Gabarits : Feuilles › Gabarits › ＋ Charte. Blocs : Bibliothèque › « Charte · … ». Compétences : onglet Compétences.</p>
+    <details class="menu brand-menu"><summary class="brand" title="Menu FicheStudio : fichier, export, charte">Fiche<b>Studio</b> <span class="caret">▾</span></summary>
+      <div class="menu-body menu-cols">
+        <div class="menu-col">
+          <div class="menu-title">Fichier</div>
+          <button data-act="new">Nouveau</button>
+          <button data-act="docs">Documents…<small>tous les fichiers .af d'un dossier, avec miniatures</small></button>
+          <button data-act="open">Ouvrir… <kbd>⌘O</kbd><small>.fstudio, .af, .afdesign</small></button>
+          <button data-act="save">Enregistrer <kbd>⌘S</kbd><small>fichier .fstudio</small></button>
+          <button data-act="l2p">Calques → feuilles…<small>une feuille par calque choisi (pages, ressources)</small></button>
+          <hr />
+          <div class="menu-title">Exporter</div>
+          <button data-act="pdf">PDF… <kbd>⌘P</kbd><small>un fichier, un par feuille ou par partie ; polices intégrées</small></button>
+          <button data-act="print">Imprimer…<small>impression directe du navigateur</small></button>
+          <button data-act="svg">SVG de la page</button>
+          <button data-act="affinity">Pour Affinity<small>script qui recrée un .af natif</small></button>
+          <hr />
+          <div class="menu-title">Exemples</div>
+          <div id="samples-list"></div>
+        </div>
+        <div class="menu-col">
+          <div class="menu-title">Charte des ateliers</div>
+          <button data-act="charte">Consulter la charte graphique<small>couleurs, typographie, mesures des ateliers</small></button>
+          <button data-act="chartecopy">Appliquer la charte à tous les calques<small>copie le modèle de chaque calque d'après son nom (P01, R01, S01, E01…)</small></button>
+          <button data-act="chartevariant">Variantes de disposition…<small>Classique 1.1 · Chapitres I, a · Grille A1, A2… · Mixte 1, a, i</small></button>
+          <button data-act="charteprefs">Préférences (fichier init)…<small>couleurs, étiquettes, compétences, rayons, variante par défaut</small></button>
+          <button data-act="chartecheck">Vérifier le document<small>découpes, types de feuilles, pastilles de niveau</small></button>
+          <p class="hint">Modèles et blocs : bouton Modèles de la barre d'outils. Compétences : onglet Compétences.</p>
+        </div>
       </div>
     </details>
     <button class="ico" data-act="undo" title="Annuler (⌘Z)">↶</button>
     <button class="ico" data-act="redo" title="Rétablir (⌘⇧Z)">↷</button>
     <div id="tabs"></div>
     <span class="spacer"></span>
-    <button class="present-btn" data-act="present" title="Présenter en plein écran : correction pas à pas, annotations (F5)">▶ Présenter</button>
+    <button class="present-btn" data-act="presentmenu" title="Espace Présentation : classes, choix des feuilles, avancement de la correction (F5 : présenter tout de suite)">▶ Présentation</button>
     <button class="ico" data-act="zout" title="Zoom arrière">−</button>
     <button id="zoom" data-act="zoommenu" title="Niveaux de zoom (⌘0 : ajuster à la fenêtre)">100 %</button>
     <button class="ico" data-act="zin" title="Zoom avant">+</button>
   </header>
   <nav id="toolbar"></nav>
   <aside id="left"><section id="pages" class="panel"></section>
-    <div class="tabs"><button data-tab="layers" class="on">Calques</button><button data-tab="library">Bibliothèque</button><button data-tab="competences">Compétences</button></div>
-    <section id="layers" class="panel grow"></section><section id="library" class="panel grow" hidden></section><section id="competences" class="panel grow" hidden></section></aside>
+    <div class="tabs"><button data-tab="layers" class="on">Calques</button><button data-tab="competences">Compétences</button></div>
+    <section id="layers" class="panel grow"></section><section id="competences" class="panel grow" hidden></section></aside>
   <main id="stage"><div id="master-banner" hidden></div></main>
-  <aside id="right"><section id="props" class="panel grow"></section><section id="data" class="panel"></section></aside>
+  <aside id="right"><section id="export" class="panel">
+    <div class="panel-head"><h3>Exporter</h3></div>
+    <div class="ex-grid">
+      <button data-act="save" title="Enregistrer — fichier .fstudio"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z M8 4v5h7V4 M8 20v-6h8v6"/></svg><span>Enregistrer<small>fichier .fstudio</small></span></button>
+      <button data-act="pdf" title="PDF… — tout, par feuille ou par partie"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z M14 3v5h5 M9.5 14h5 M9.5 17h5"/></svg><span>PDF…<small>tout, par feuille ou par partie</small></span></button>
+      <button data-act="pdfseries" title="PDF en série… — une fiche par ligne du CSV"><svg viewBox="0 0 24 24"><path d="M6 5h9l3 3v11H6z M9 2h9l3 3v11 M9 12h6 M9 15h6"/></svg><span>PDF en série…<small>une fiche par ligne du CSV</small></span></button>
+      <button data-act="print" title="Imprimer… — impression du navigateur"><svg viewBox="0 0 24 24"><path d="M7 9V4h10v5 M5 9h14v7h-3 M8 16H5V9 M8 13h8v7H8z"/></svg><span>Imprimer…<small>impression du navigateur</small></span></button>
+      <button data-act="svg" title="SVG de la page — dessin vectoriel"><svg viewBox="0 0 24 24"><path d="M4 18 9 7l4 8 2-4 5 7z M4 20h16"/></svg><span>SVG de la page<small>dessin vectoriel</small></span></button>
+      <button data-act="affinity" title="Pour Affinity — script qui recrée un .af"><svg viewBox="0 0 24 24"><path d="M12 3 3 19h18z M8 14h8"/></svg><span>Pour Affinity<small>script qui recrée un .af</small></span></button>
+    </div></section>
+    <section id="props" class="panel grow"></section><section id="data" class="panel"></section></aside>
   <footer id="status"></footer>
   <script type="module" src="/src/main.ts"></script>
 </body>

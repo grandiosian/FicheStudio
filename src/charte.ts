@@ -204,7 +204,7 @@ export const hasCharteMasters = (doc: Doc) => doc.masters.some((m) => m.name.sta
 
 // ------------------------------------------------------------------ variantes par classe
 
-export const LEVELS = ["6", "5", "4", "3"];
+export const LEVELS = ["5", "4", "3"];
 
 /** Fige les pastilles sur une classe : numéro écrit en dur et couleur de la classe
  *  (au lieu de suivre {{niveau}} et la couleur du document). */

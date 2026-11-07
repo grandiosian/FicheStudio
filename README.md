@@ -49,7 +49,7 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
 - **Présentation** (▶ Présenter ou F5), pensée pour le vidéoprojecteur en écran dupliqué :
   plein écran, correction pas à pas (→ / Espace / télécommande : les calques « _Corr » et les
   objets cochés « Étape de correction » apparaissent un par un dans l'ordre de lecture),
-  clic sur un bloc ou rectangle tracé (aux proportions de l'écran) pour l'agrandir sur tout
+  clic sur un bloc ou rectangle tracé vers la droite (au format choisi : écran, 16:9, 16:10, 4:3 ou libre) pour l'agrandir sur tout
   l'écran, niveaux de zoom (feuille entière, pleine largeur, ×1,5 à ×4, − / +, molette),
   main pour se déplacer dans la feuille agrandie (H ou bouton du milieu),
   stylo, surligneur, flèche, gomme, 6 couleurs, 3 épaisseurs, tableau blanc (blanc, carreaux,
@@ -68,11 +68,52 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   d'être copiée ; seule la référence est enregistrée. « Intégrer » / « Relier… » dans les propriétés.
 - **Exports** : PDF vectoriel intelligent (un fichier, un par feuille ou un par partie, nommés
   d'après les feuilles, ZIP, série CSV, polices intégrées), impression du navigateur, SVG par
-  page, format natif `.fiche.json`, et **script Affinity**.
+  page, format natif **`.fstudio`** (les anciens `.fiche.json` s'ouvrent toujours), et **script Affinity**.
 - Annuler/rétablir (200 niveaux), sauvegarde automatique locale (IndexedDB).
+- **Barre d'outils** en groupes : sélection (V, A, H) · dessin (P, L, M, E) · texte (T) · insertion
+  (modèles, tableau, image) ; la lettre du raccourci est rappelée dans le coin de chaque bouton.
+- **Vue isolée** (touche **I**, clic droit › Isoler, ou Propriétés › ◎ Isoler) : seuls la sélection, ou le
+  calque actif, restent affichés, cadrés à l'écran, pour travailler dessus ; les nouveaux objets vont
+  dans l'élément isolé. **I** ou **Échap** (sans sélection) ramène à la vue complète, exactement au
+  même zoom et au même endroit.
 - **Cadrer** : double-clic sur un calque ou un objet du panneau Calques = zoom animé sur son cadre
   (⌥ double-clic pour renommer). **Clic droit** : zoom au plus près, sélectionner le contenu,
   renommer, masquer, verrouiller, et pour un calque : appliquer / remplacer / retirer un modèle de la charte.
+- **Sélection multiple dans Calques** : clic, puis Maj + clic = toutes les lignes entre les deux
+  (un calque replié apporte son contenu) ; ⌘/Ctrl + clic ajoute ou retire un élément.
+- **Panneau droit** : section **Exporter** en haut (enregistrer, PDF, PDF en série, imprimer, SVG,
+  Affinity), propriétés de la sélection en dessous.
+- **Documents** (Fichier › Documents…) : explorateur de tous les fichiers .af (sous-dossiers compris)
+  d'un dossier, avec leur miniature (celle enregistrée par Affinity dans le fichier), recherche, tri,
+  et **boutons de filtre par sous-dossier** (fil d'Ariane pour remonter, nombre de fichiers par dossier).
+  En local (`npm run dev`), « Dossier sur ce Mac » fait lire le dossier par le serveur de
+  développement (dossier personnel uniquement) : fonctionne dans tous les navigateurs. Sur le site
+  publié, « Choisir un dossier… » utilise le sélecteur de Chrome / Edge (dossier mémorisé).
+- **Barre de présentation compacte** : étape précédente / suivante avec le compteur, puis quatre gros boutons
+  (Feuilles, Zoom, Outils, Tableau) qui ouvrent chacun leur rangée de sous-icônes, et le bouton **Main**
+  pour déplacer la vue (aussi : **Espace maintenu** en glissant, bouton du milieu de la souris, H ;
+  un appui bref sur Espace passe à l'étape suivante). Un rectangle tracé **vers la gauche** dézoome
+  d'un cran à chaque fois.
+- **Corrigé en grand** (bouton « Texte » de la barre, touche **T**) : le texte de l'étape révélée (calque
+  « _Corr » ou objets « étape ») est remis en page sur tout l'écran, au plus grand corps qui tient,
+  en gardant gras, couleurs et paragraphes. → / ← passent d'une étape à l'autre ; « Tout le corrigé »
+  affiche tout le corrigé de la feuille ; Échap ou T revient à la feuille. En double vue, le projecteur
+  affiche le même texte, ajusté à sa propre taille.
+- **Double vue** (bouton « Projeter » de la barre, ou case « Double vue » de l'espace Présentation) :
+  comme OpenBoard, l'ordinateur garde la **vue professeur** et une seconde fenêtre affiche la
+  **projection** plein écran (à placer sur le vidéoprojecteur en mode écran étendu ; Chrome / Edge
+  l'y envoient automatiquement avec l'autorisation « Gestion des fenêtres »). Tout est synchronisé :
+  feuille, étapes, zoom, annotations, tableau. La vue professeur montre le **cadre projeté**, les
+  corrigés à venir **en transparence** (invisibles au projecteur) avec la prochaine étape surlignée,
+  un chronomètre, et les boutons **Écran noir** (N) et **Figer** (K). Les flèches et Espace
+  fonctionnent depuis les deux fenêtres. Autoriser les fenêtres surgissantes pour le site.
+- **Espace Présentation** (bouton « ▶ Présentation ») : document à présenter (onglets ouverts ou
+  explorateur de documents), feuilles à projeter, et **classes** (ex. 5eA, 4eB) avec leur niveau.
+  L'avancement de la correction est enregistré pour chaque classe et chaque document : barre
+  d'avancement par feuille (à faire, en cours, corrigée), « Reprendre » là où la classe s'était
+  arrêtée, tableau de toutes les classes, remise à zéro. Le bouton **🏁 Fin de cours** de la présentation
+  (touche Fin) marque où la classe s'est arrêtée : la séance est ajoutée à l'**historique des séances** de la
+  classe (date, « de … à … »), le drapeau 🏁 apparaît sur la feuille, et « Reprendre » repart du dernier marqueur. F5 présente directement le document affiché.
 - **Œil et cadenas** : zones cliquables de 24 px ; appuyer puis glisser sur d'autres lignes masque,
   affiche ou verrouille plusieurs calques d'un coup (une seule annulation).
 - **Couleurs en direct** : la page suit le sélecteur de couleur pendant qu'on le fait glisser ;
@@ -91,7 +132,8 @@ La charte ([docs/charte_ateliers.md](docs/charte_ateliers.md)) est intégrée :
 - **variantes de disposition** (Charte › Variantes) : Classique (1 · 1.1 · 1.1.1), Chapitres
   (« Chapitre I », a), b)… 1.), Grille (A, puis A1, A2… B1, B2…), Mixte (1 · a · i). La variante règle la
   numérotation et le style des titres ; les blocs « titre de niveau 1/2/3 » de la bibliothèque suivent la variante ;
-- **＋ Charte** (panneau Feuilles) : le modèle de la charte est **copié dans chaque calque de page**
+- **Menu FicheStudio** (le nom en haut à gauche) : fichier, export, exemples et charte, sur deux colonnes.
+- **FicheStudio › Appliquer la charte à tous les calques** : le modèle de la charte est **copié dans chaque calque de page**
   (groupe verrouillé « Modèle charte · … », sous le contenu), choisi d'après le nom du calque
   (P01 → feuille d'atelier, la 1re ayant le grand en-tête ; R01 → ressource ; S01 → synthèse ;
   E01 → évaluation…). Chaque calque garde ainsi son propre en-tête, modifiable, sans gabarit partagé.
@@ -105,7 +147,9 @@ La charte ([docs/charte_ateliers.md](docs/charte_ateliers.md)) est intégrée :
   mots, objectif, cadre de ressource, blocs ressources (liseré bleu avec cartouche arrondi du nom :
   pleine largeur, demi-largeur, avec image, avec tableau), bloc définition, barème,
   « → Tourne la page », réponse corrigée ;
-- **Modèles** (icône de la barre d'outils) : fenêtre d'aperçus de la charte, avec filtre. Les 5 modèles
+- **Modèles** (icône de la barre d'outils) : fenêtre d'aperçus qui regroupe aussi l'ancienne bibliothèque,
+  par rubriques (Pages, Titres, Blocs de la charte, Blocs généraux, **Mes blocs** avec « ＋ Sélection » et
+  « ＋ Calque actif »), avec filtre. Les 5 modèles
   de page se copient dans le calque actif (celui conseillé pour son nom est entouré) ; les titres de
   la variante et tous les blocs s'insèrent d'un clic. Choix de la **classe** (Document, 6e, 5e, 4e, 3e) :
   avec une classe, les pastilles sont figées sur son numéro et sa couleur ;
@@ -122,6 +166,19 @@ Onglet **Compétences** (extrait de `Prog_Acad_Techno_College_5-4-3.xlsx` par
 attendus par niveau (5e, 4e, 3e) et connaissances, recherche, filtre de niveau. ◉ insère la pastille
 de compétence dans la marge, colorée selon le thème (T1 vert, T2 rose, T3 jaune orangé), ≡ insère les attendus en liste à puces ; ✓ marque les
 compétences déjà présentes dans le document.
+
+**Compétences des calques** : clic droit sur un calque, un groupe ou un objet › Compétences… (ou
+Propriétés › Compétences › Choisir…) ouvre une fenêtre de choix (recherche, niveau, cases à cocher).
+Dans le panneau Calques, les compétences s'affichent à droite du nom : points de couleur quand le
+panneau est étroit, pastilles avec les codes quand il est assez large (clic sur une pastille = isoler). Dans la vue
+création, les pastilles s'affichent dans la marge gauche, à hauteur de l'élément, empilées l'une sous
+l'autre (non imprimées) ; clic droit › « Poser les pastilles sur la feuille » en fait des objets
+imprimés (groupe « …_Comp »). Dans l'onglet
+Compétences, la vue **« Calques par compétence »** regroupe les éléments marqués sous chaque compétence,
+avec un bouton « 👁 Isoler » ; dans le référentiel, « 👁 n calques » fait de même : un clic les
+**isole** : seuls les calques qui contiennent la compétence sont affichés, en entier (même s'ils
+sont masqués dans le document), tous les autres sont cachés ; le panneau Calques ne montre qu'eux et liste les
+éléments, toutes feuilles confondues, pour y aller d'un clic. Cycle 4 uniquement : 5e, 4e, 3e.
 
 ### Polices dans les PDF
 

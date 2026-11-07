@@ -2,7 +2,8 @@
 import { store } from "./store";
 import { screenMatrixOf, stageEl, render, drawOverlay } from "./canvas";
 import { defaultRun, newParagraph, type Paragraph, type Run, type TextNode } from "./model";
-import { fontMetrics } from "./textlayout";
+import { fontMetrics, textHeight } from "./textlayout";
+import { prepareText, varsFor } from "./templates";
 import { fmt } from "./geom";
 
 let editor: HTMLDivElement | null = null;
@@ -140,8 +141,13 @@ export function closeTextEditor() {
       else {
         n.paragraphs = paragraphs;
         n.name = paragraphs.map((p) => p.runs.map((r) => r.text).join("")).join(" ").slice(0, 30) || "Texte";
-        // cadre trop petit : on l'agrandit pour éviter le texte masqué
-        if (n.frame) n.frame.h = Math.max(n.frame.h, div.offsetHeight);
+        // cadre trop petit : on l'agrandit pour éviter le texte masqué. On mesure le texte tel qu'il
+        // s'affiche (variables remplacées) : « {{niveau}} » dans une pastille de 110 px se replie
+        // lettre par lettre dans l'éditeur et étirait le cadre sur plus de 1000 px.
+        if (n.frame) {
+          const shown = prepareText(n, null, store.doc.numbering, varsFor(store.doc, store.pageIndex));
+          n.frame.h = Math.max(n.frame.h, Math.ceil(textHeight(shown)));
+        }
       }
     });
   }

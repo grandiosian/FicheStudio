@@ -107,7 +107,8 @@ La charte ([docs/charte_ateliers.md](docs/charte_ateliers.md)) est intégrée :
   « → Tourne la page », réponse corrigée ;
 - **Modèles** (icône de la barre d'outils) : fenêtre d'aperçus de la charte, avec filtre. Les 5 modèles
   de page se copient dans le calque actif (celui conseillé pour son nom est entouré) ; les titres de
-  la variante et tous les blocs s'insèrent d'un clic ;
+  la variante et tous les blocs s'insèrent d'un clic. Choix de la **classe** (Document, 6e, 5e, 4e, 3e) :
+  avec une classe, les pastilles sont figées sur son numéro et sa couleur ;
 - **Tableau** (icône de la barre d'outils : grille à survoler pour choisir rangées × colonnes ; ou panneau Propriétés) : rangées, colonnes, rangée et colonne de titre, largeur, hauteur
   des cases. Le tableau est un dossier de calques : une rangée par groupe, chaque case = rectangle +
   texte ; en-têtes bleu clair, contours bleus ;

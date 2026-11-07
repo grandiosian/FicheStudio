@@ -202,6 +202,26 @@ export function updateCharteMasters(doc: Doc): number {
 }
 export const hasCharteMasters = (doc: Doc) => doc.masters.some((m) => m.name.startsWith("Charte · "));
 
+// ------------------------------------------------------------------ variantes par classe
+
+export const LEVELS = ["6", "5", "4", "3"];
+
+/** Fige les pastilles sur une classe : numéro écrit en dur et couleur de la classe
+ *  (au lieu de suivre {{niveau}} et la couleur du document). */
+export function fixLevel(nodes: SceneNode[], level: string): SceneNode[] {
+  const color = DEFAULT_LEVEL_COLORS[level] ?? "#fcca30";
+  const visit = (n: SceneNode) => {
+    if (n.type === "text") for (const p of n.paragraphs) for (const r of p.runs) r.text = r.text.replace(/\{\{niveau\}\}/g, level);
+    if ((n.type === "shape" || n.type === "path") && n.bind?.fill === "couleur_niveau") {
+      n.fill = solid(color);
+      n.bind = { ...n.bind, fill: undefined };
+    }
+    if (n.type === "group") n.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return nodes;
+}
+
 // ------------------------------------------------------------------ modèles copiés dans les calques
 
 /** Modèles de la charte (mêmes contenus que les gabarits), à copier dans un calque de page. */
@@ -218,13 +238,14 @@ const TEMPLATE_KIND = ["fiche", "fiche", "ressource", "synthese", "eval"] as con
 /** Copie le modèle n° i dans le calque, sous son contenu ; remplace un modèle déjà présent.
  *  L'en-tête ({{entete}}) est écrit d'après le type du calque, car une page peut porter
  *  plusieurs calques de types différents (P01, R01… dans un même fichier Affinity). */
-export function applyTemplate(layer: import("./model").GroupNode, i: number, kind?: string) {
+export function applyTemplate(layer: import("./model").GroupNode, i: number, kind?: string, level?: string) {
   const m = charteMasters()[i];
   const nodes = m.layers.flatMap((l) => l.children);
+  if (level) fixLevel(nodes, level);
   const k = kind && templateFor(kind) === templateFor(TEMPLATE_KIND[i]) ? kind : TEMPLATE_KIND[i];
   const entete = SHEET_KINDS[k as keyof typeof SHEET_KINDS].entete;
   walkText(nodes, (p) => { for (const r of p.runs) r.text = r.text.replace(/\{\{entete\}\}/g, entete); });
-  const g = newGroup(nodes, `${TEMPLATE_PREFIX}${TEMPLATES[i]}`);
+  const g = newGroup(nodes, `${TEMPLATE_PREFIX}${TEMPLATES[i]}${level ? ` · ${level}e` : ""}`);
   g.locked = true; // le modèle ne bouge pas quand on travaille le contenu
   const at = layer.children.findIndex((c) => c.name.startsWith(TEMPLATE_PREFIX));
   if (at >= 0) layer.children.splice(at, 1, g); else layer.children.unshift(g);

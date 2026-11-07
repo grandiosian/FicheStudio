@@ -2,7 +2,7 @@
 import { store } from "./store";
 import { selectionBoxes, render as renderCanvas, zoomToFit, frameNode } from "./canvas";
 import {
-  newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
+  DEFAULT_LEVEL_COLORS, newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
   type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page, type GroupNode,
 } from "./model";
 import { mul, rotateAt, rotationOf, scaleAt, translate, boxOfPoints, type Box } from "./geom";
@@ -14,7 +14,7 @@ import { isEditingText, styleCommand, insertAtCaret } from "./textedit";
 import { findVars, parseCsv, SCHEMES } from "./templates";
 import { refreshCompetences } from "./competences";
 import { renderPage } from "./render";
-import { charteMasters, makeTable, applyTemplate, templateFor, TEMPLATES, TEMPLATE_PREFIX } from "./charte";
+import { fixLevel, LEVELS, charteMasters, makeTable, applyTemplate, templateFor, TEMPLATES, TEMPLATE_PREFIX } from "./charte";
 import { variantOf, PREFS, palette, TEXT_STYLES, applyTextStyle } from "./charte";
 import { atelierMaster, builtinItems, deleteItem, emptyMaster, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
 import { embedAsset, relinkImage, canLinkFiles } from "./assets";
@@ -219,7 +219,7 @@ function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
     <button data-m="rename">Renommer…</button>
     <button data-m="eye">${node.visible ? "Masquer" : "Afficher"}</button>
     <button data-m="lock">${node.locked ? "Déverrouiller" : "Verrouiller"}</button>
-    ${isLayer ? `<hr><div class="menu-title">Modèle de la charte</div>${TEMPLATES.map((t, i) => `<button data-tpl="${i}">${tpl?.name === TEMPLATE_PREFIX + t ? "✓ " : ""}${t}</button>`).join("")}
+    ${isLayer ? `<hr><div class="menu-title">Modèle de la charte</div>${TEMPLATES.map((t, i) => `<button data-tpl="${i}">${tpl && (tpl.name === TEMPLATE_PREFIX + t || tpl.name.startsWith(`${TEMPLATE_PREFIX}${t} · `)) ? "✓ " : ""}${t}</button>`).join("")}
       ${tpl ? `<button data-m="untpl">Retirer le modèle</button>` : ""}` : ""}`;
   document.body.appendChild(m);
   m.style.left = `${Math.min(x, innerWidth - m.offsetWidth - 8)}px`;
@@ -647,6 +647,8 @@ function fitThumbs(root: HTMLElement) {
   });
 }
 
+let pickLevel = ""; // classe choisie dans la fenêtre Modèles ("" = niveau du document)
+
 /** Barre d'outils › Modèles : modèles de page à copier dans le calque actif, titres et blocs de la charte. */
 export function templatePicker(anchor: HTMLElement) {
   document.querySelector(".pop-menu")?.remove();
@@ -656,19 +658,27 @@ export function templatePicker(anchor: HTMLElement) {
   const layer = store.layer();
   const kind = kindOfLayer(layer, store.page);
   const current = layer.children.find((c) => c.name.startsWith(TEMPLATE_PREFIX))?.name;
-  const items = builtinItems(variantOf(store.doc)).filter((it) => it.name.startsWith("Charte · "));
+  const all = builtinItems(variantOf(store.doc));
+  const items = all.filter((it) => it.name.startsWith("Charte · ") || it.name === "Pastille de niveau");
   const headings = items.filter((it) => /titre de niveau/.test(it.name));
   const blocks = items.filter((it) => !/titre de niveau/.test(it.name));
   const card = (cls: string, attr: string, svg: string, label: string, on = false) =>
     `<button class="tpl-card ${cls} ${on ? "on" : ""}" ${attr} title="${esc(label)}">${svg}<span>${esc(label)}</span></button>`;
+  // classe choisie : "" = pastille liée au niveau du document, sinon pastille figée sur la classe
+  const lv = (nodes: SceneNode[]) => (pickLevel ? fixLevel(nodes, pickLevel) : nodes);
+  const docLevel = store.doc.fields.niveau ?? "";
+  const isOn = (t: string) => !!current && (current === TEMPLATE_PREFIX + t || current.startsWith(`${TEMPLATE_PREFIX}${t} · `));
   m.innerHTML = `<div class="tpl-head"><b>Modèles de la charte</b><span class="spacer"></span><input type="search" placeholder="Filtrer…" class="tpl-filter"></div>
+    <div class="tpl-levels"><span>Classe :</span>
+      <button data-lv="" class="${pickLevel ? "" : "on"}" title="La pastille suit le niveau réglé dans Document">Document${docLevel ? ` (${esc(docLevel)}e)` : ""}</button>
+      ${LEVELS.map((l) => `<button data-lv="${l}" class="${pickLevel === l ? "on" : ""}" style="--lv:${DEFAULT_LEVEL_COLORS[l]}"><i></i>${l}e</button>`).join("")}</div>
     <div class="tpl-scroll">
     <div class="menu-title">Modèle de page → calque « ${esc(layer.name)} »${current ? " (remplace le modèle en place)" : ""}</div>
-    <div class="tpl-grid pages">${masters.map((ms, i) => card("page", `data-tpl="${i}"`, thumb(ms.layers.flatMap((l) => l.children), { w: ms.width, h: ms.height }), TEMPLATES[i], current === TEMPLATE_PREFIX + TEMPLATES[i] || (!current && i === templateFor(kind)))).join("")}</div>
+    <div class="tpl-grid pages">${masters.map((ms, i) => card("page", `data-tpl="${i}"`, thumb(lv(ms.layers.flatMap((l) => l.children)), { w: ms.width, h: ms.height }), `${TEMPLATES[i]}${pickLevel ? ` · ${pickLevel}e` : ""}`, isOn(TEMPLATES[i]) || (!current && i === templateFor(kind)))).join("")}</div>
     <div class="menu-title">Titres · ${esc(variantOf(store.doc).label)}</div>
     <div class="tpl-grid">${headings.map((it) => card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name.replace(/^Charte · /, ""))).join("")}</div>
     <div class="menu-title">Blocs</div>
-    <div class="tpl-grid">${blocks.map((it) => card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name.replace(/^Charte · /, ""))).join("")}</div>
+    <div class="tpl-grid">${blocks.map((it) => card("block", `data-it="${it.id}"`, thumb(lv(structuredClone(it.nodes))), it.name.replace(/^Charte · /, "") + (pickLevel && it.name === "Pastille de niveau" ? ` · ${pickLevel}e` : ""))).join("")}</div>
     </div>`;
   const r = anchor.getBoundingClientRect();
   m.style.left = `${r.right + 6}px`;
@@ -686,16 +696,27 @@ export function templatePicker(anchor: HTMLElement) {
   };
   filter.focus();
   m.onclick = (e) => {
+    const lvBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-lv]");
+    if (lvBtn) {
+      // nouvelle classe : on reconstruit la fenêtre avec les aperçus de cette classe
+      pickLevel = lvBtn.dataset.lv!;
+      const q = filter.value;
+      close();
+      templatePicker(anchor);
+      const f2 = document.querySelector<HTMLInputElement>(".tpl-filter");
+      if (f2 && q) { f2.value = q; f2.dispatchEvent(new Event("input")); }
+      return;
+    }
     const b = (e.target as HTMLElement).closest<HTMLElement>(".tpl-card");
     if (!b) return;
     close();
     if (b.dataset.tpl) {
       const i = +b.dataset.tpl;
-      store.commit(() => { applyTemplate(store.layer(), i, kind); store.doc.charte ??= PREFS.variante; });
-      document.dispatchEvent(new CustomEvent("status", { detail: `Modèle « ${TEMPLATES[i]} » copié dans le calque « ${layer.name} ».` }));
+      store.commit(() => { applyTemplate(store.layer(), i, kind, pickLevel || undefined); store.doc.charte ??= PREFS.variante; });
+      document.dispatchEvent(new CustomEvent("status", { detail: `Modèle « ${TEMPLATES[i]}${pickLevel ? ` · ${pickLevel}e` : ""} » copié dans le calque « ${layer.name} ».` }));
     } else {
       const it = items.find((x) => x.id === b.dataset.it);
-      if (it) insertItem(it);
+      if (it) insertItem(pickLevel ? { ...it, nodes: fixLevel(structuredClone(it.nodes), pickLevel) } : it);
     }
   };
 }

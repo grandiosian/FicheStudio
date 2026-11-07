@@ -325,3 +325,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 .tpl-card.page svg { height: auto; aspect-ratio: 2480 / 3508; }
 .tpl-card span { font-size: 11px; line-height: 1.2; color: var(--text, #e6e9f0); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tpl-card[hidden] { display: none; }
+.tpl-levels { display: flex; align-items: center; gap: 5px; padding: 6px 10px; border-bottom: 1px solid var(--line, #3a4256); font-size: 12px; flex-wrap: wrap; }
+.tpl-levels > span { color: var(--muted); margin-right: 2px; }
+.tpl-levels button { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--line, #3a4256); background: var(--panel-2, #1c2230); color: inherit; cursor: pointer; font-size: 12px; }
+.tpl-levels button i { width: 11px; height: 11px; border-radius: 50%; background: var(--lv); display: inline-block; }
+.tpl-levels button.on { border-color: #4d7fe0; box-shadow: 0 0 0 2px rgba(77,127,224,.35); }

@@ -125,18 +125,22 @@ export interface Page {
   kind?: SheetKind;
 }
 
-/** Types de feuille d'un atelier : numérotation et en-tête propres. */
-export type SheetKind = "fiche" | "ressource" | "eval" | "evalres";
-export const SHEET_KINDS: Record<SheetKind, { label: string; prefix: string; entete: string }> = {
-  fiche: { label: "Fiche d'activité", prefix: "P", entete: "ATELIER" },
-  ressource: { label: "Ressource", prefix: "R", entete: "RESSOURCE" },
-  eval: { label: "Évaluation", prefix: "E", entete: "ÉVALUATION" },
-  evalres: { label: "Ressource d'évaluation", prefix: "ER", entete: "RESSOURCE D'ÉVALUATION" },
+/** Types de feuille d'un atelier (charte des ateliers) : numérotation, en-tête, couleur d'étiquette, ordre. */
+export type SheetKind = "peda" | "prof" | "fiche" | "ressource" | "synthese" | "eval" | "evalres";
+export const SHEET_KINDS: Record<SheetKind, { label: string; prefix: string; entete: string; tag: string; order: number }> = {
+  peda: { label: "Fiche pédagogique", prefix: "FichePeda", entete: "FICHE PÉDAGOGIQUE", tag: "#ffdc00", order: 0 },
+  prof: { label: "Fiche professeur", prefix: "PROF", entete: "FICHE PROFESSEUR", tag: "#ffdc00", order: 1 },
+  fiche: { label: "Feuille d'atelier", prefix: "P", entete: "ATELIER", tag: "#118eff", order: 2 },
+  ressource: { label: "Ressource", prefix: "R", entete: "RESSOURCE", tag: "#ff8c00", order: 3 },
+  synthese: { label: "Synthèse", prefix: "S", entete: "SYNTHÈSE", tag: "#cb64ff", order: 4 },
+  eval: { label: "Évaluation", prefix: "E", entete: "ÉVALUATION", tag: "#ff4f44", order: 5 },
+  evalres: { label: "Ressource d'évaluation", prefix: "R", entete: "RESSOURCE D'ÉVALUATION", tag: "#ff8c00", order: 6 },
 };
 
 /** Prochain nom libre pour un type de feuille : P01, R02, E01, ER01… */
 export function nextSheetName(pages: Page[], kind: SheetKind): string {
   const pre = SHEET_KINDS[kind].prefix;
+  if (kind === "peda" || kind === "prof") return pre; // une seule par atelier
   const re = new RegExp(`(^|[_\\s-])${pre}(\\d+)$`, "i");
   const n = Math.max(0, ...pages.map((p) => { const m = p.name.match(re); return m ? +m[2] : 0; })) + 1;
   return `${pre}${String(n).padStart(2, "0")}`;
@@ -160,7 +164,12 @@ export interface Asset {
 }
 
 export type NumberingScheme = "decimal" | "roman" | "alpha" | "letters";
-export interface Numbering { scheme: NumberingScheme; restart: "doc" | "page" | "section"; suffix: string }
+export interface Numbering {
+  scheme: NumberingScheme; restart: "doc" | "page" | "section"; suffix: string;
+  prefix1?: string;                    // devant les numéros de niveau 1 (« Chapitre »)
+  suffixes?: [string, string, string]; // séparateur propre à chaque niveau (sinon suffix)
+  bold?: boolean;                      // numéro en gras
+}
 
 export interface Doc {
   format: "fichestudio";
@@ -174,6 +183,8 @@ export interface Doc {
   fields: Record<string, string>;     // variables du document (atelier, séquence, niveau…)
   levelColors: Record<string, string>; // couleur de pastille par niveau de classe
   numbering: Numbering;
+  /** Variante de disposition de la charte (numérotation et titres). */
+  charte?: string;
 }
 
 // ------------------------------------------------------------------ fabriques
@@ -230,7 +241,8 @@ export function newPage(width = 2480, height = 3508, name = "Page 1"): Page {
   return { id: uid("p"), name, width, height, background: "#ffffff", layers: [newLayer("Calque 1")], sections: 1, split: "h", master: null, masterMode: "sheet", fields: {} };
 }
 
-export const DEFAULT_LEVEL_COLORS: Record<string, string> = { "6": "#e94e77", "5": "#21b14c", "4": "#fcca30", "3": "#4f8cff" };
+// couleurs de pastille de niveau de la charte (5e vert, 4e jaune, 3e rouge)
+export const DEFAULT_LEVEL_COLORS: Record<string, string> = { "6": "#e94e77", "5": "#30c700", "4": "#fcca30", "3": "#d82834" };
 
 export function newDoc(name = "Sans titre"): Doc {
   return {

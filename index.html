@@ -25,19 +25,28 @@
         <div id="samples-list"></div>
       </div>
     </details>
+    <details class="menu"><summary>Charte</summary>
+      <div class="menu-body">
+        <button data-act="charte">Consulter la charte graphique<small>couleurs, typographie, mesures des ateliers</small></button>
+        <button data-act="chartevariant">Variantes de disposition…<small>Classique 1.1 · Chapitres I, a · Grille A1, A2… · Mixte 1, a, i</small></button>
+        <button data-act="charteprefs">Préférences (fichier init)…<small>couleurs, étiquettes, compétences, rayons des bandeaux, variante par défaut</small></button>
+        <button data-act="chartecheck">Vérifier le document<small>découpes, types de feuilles, pastilles de niveau</small></button>
+        <p class="hint">Gabarits : Feuilles › Gabarits › ＋ Charte. Blocs : Bibliothèque › « Charte · … ». Compétences : onglet Compétences.</p>
+      </div>
+    </details>
     <button class="ico" data-act="undo" title="Annuler (⌘Z)">↶</button>
     <button class="ico" data-act="redo" title="Rétablir (⌘⇧Z)">↷</button>
     <div id="tabs"></div>
     <span class="spacer"></span>
     <button class="present-btn" data-act="present" title="Présenter en plein écran : correction pas à pas, annotations (F5)">▶ Présenter</button>
     <button class="ico" data-act="zout" title="Zoom arrière">−</button>
-    <button id="zoom" data-act="fit" title="Ajuster à la fenêtre (⌘0)">100 %</button>
+    <button id="zoom" data-act="zoommenu" title="Niveaux de zoom (⌘0 : ajuster à la fenêtre)">100 %</button>
     <button class="ico" data-act="zin" title="Zoom avant">+</button>
   </header>
   <nav id="toolbar"></nav>
   <aside id="left"><section id="pages" class="panel"></section>
-    <div class="tabs"><button data-tab="layers" class="on">Calques</button><button data-tab="library">Bibliothèque</button></div>
-    <section id="layers" class="panel grow"></section><section id="library" class="panel grow" hidden></section></aside>
+    <div class="tabs"><button data-tab="layers" class="on">Calques</button><button data-tab="library">Bibliothèque</button><button data-tab="competences">Compétences</button></div>
+    <section id="layers" class="panel grow"></section><section id="library" class="panel grow" hidden></section><section id="competences" class="panel grow" hidden></section></aside>
   <main id="stage"><div id="master-banner" hidden></div></main>
   <aside id="right"><section id="props" class="panel grow"></section><section id="data" class="panel"></section></aside>
   <footer id="status"></footer>

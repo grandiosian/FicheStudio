@@ -59,7 +59,7 @@ class Store {
   on(fn: (why: string) => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(why = "change") {
     for (const l of this.listeners) l(why);
-    if (why === "change" || why === "doc") this.scheduleSave();
+    if (why === "change" || why === "doc" || why === "live") this.scheduleSave();
   }
 
   private snap(): Snapshot {
@@ -82,6 +82,7 @@ class Store {
 
   /** Toute modification passe par ici : un niveau d'annulation par appel. */
   commit(fn: () => void, why = "change") {
+    this.liveKey = null;
     this.undoStack.push(this.snap());
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];
@@ -89,6 +90,30 @@ class Store {
     fn();
     this.emit(why);
   }
+  private liveKey: string | null = null;
+  /**
+   * Modification en direct (sélecteur de couleur qu'on fait glisser) : le canevas suit à chaque
+   * mouvement, le panneau n'est pas reconstruit (le sélecteur resterait ouvert), et toute la
+   * série ne compte que pour un seul niveau d'annulation.
+   */
+  live(key: string, fn: () => void) {
+    if (this.liveKey !== key) {
+      this.undoStack.push(this.snap());
+      this.redoStack = [];
+      this.liveKey = key;
+    }
+    this.dirty = true;
+    fn();
+    this.emit("live");
+  }
+  isLive() { return this.liveKey !== null; }
+  /** Fin d'une série « en direct » : le panneau se met à jour. */
+  endLive() {
+    if (!this.liveKey) return;
+    this.liveKey = null;
+    this.emit("change");
+  }
+
   /** Point d'annulation avant une modification faite « en direct » (glisser de nœuds). */
   checkpoint() {
     this.undoStack.push(this.snap());
@@ -186,11 +211,30 @@ class Store {
   selected(): SceneNode[] { return this.selection.map((id) => this.find(id)?.node).filter(Boolean) as SceneNode[]; }
   select(ids: string[]) { this.selection = ids; this.emit("selection"); }
 
+  /** Calque actif : celui qu'on a choisi, même masqué ou verrouillé ; sinon le plus haut modifiable. */
   layer(): GroupNode {
     const p = this.page;
-    const l = p.layers.find((l) => l.id === this.activeLayer && l.visible && !l.locked)
+    return p.layers.find((l) => l.id === this.activeLayer)
       ?? [...p.layers].reverse().find((l) => l.visible && !l.locked)
       ?? p.layers[p.layers.length - 1];
+  }
+
+  /** Calque qui reçoit un nouvel objet : le calque actif, réaffiché s'il était masqué ;
+   *  s'il est verrouillé, le plus haut calque modifiable (avec un message). */
+  drawLayer(): GroupNode {
+    const p = this.page;
+    let l = this.layer();
+    if (l.locked) {
+      const other = [...p.layers].reverse().find((x) => !x.locked);
+      if (other) {
+        document.dispatchEvent(new CustomEvent("status", { detail: `Calque « ${l.name} » verrouillé : ajout dans « ${other.name} ».` }));
+        l = other;
+      }
+    }
+    if (!l.visible) {
+      l.visible = true;
+      document.dispatchEvent(new CustomEvent("status", { detail: `Calque « ${l.name} » réaffiché pour montrer l'ajout.` }));
+    }
     return l;
   }
 

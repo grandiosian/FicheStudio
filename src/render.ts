@@ -1,4 +1,5 @@
 // Modèle -> SVG (affichage dans l'éditeur et exports).
+import { CUT } from "./charte";
 import type { Doc, Master, Page, Paint, Paragraph, SceneNode, Stroke, TextNode } from "./model";
 import { masterAreas, sectionRects } from "./model";
 import { fmt, isIdentity, shapeToD, subpathsToD, svgMatrix } from "./geom";
@@ -67,7 +68,7 @@ function geometry(n: SceneNode): string | null {
 }
 
 function text(c: Ctx, n: TextNode, editable: boolean): string {
-  const t = prepareText(n, c.numbers, c.doc.numbering.suffix, c.vars);
+  const t = prepareText(n, c.numbers, c.doc.numbering, c.vars);
   const lines = layoutText(t);
   const out: string[] = [];
   for (const l of lines) {
@@ -157,9 +158,9 @@ export function renderPage(doc: Doc, page: Page, opts: RenderOpts = {}): { defs:
   parts.push(...page.layers.map((l) => renderNode(c, l)));
   if (opts.cutMarks !== false)
     for (const [x1, y1, x2, y2] of cutLines(page)) {
-      const w = page.width / 600;
-      parts.push(`<g class="cut"><line x1="${fmt(x1)}" y1="${fmt(y1)}" x2="${fmt(x2)}" y2="${fmt(y2)}" stroke="#555" stroke-width="${fmt(w)}" stroke-dasharray="${fmt(w * 6)},${fmt(w * 4)}"/>`
-        + `<text x="${fmt(x1 + (x1 === x2 ? -w * 9 : w * 10))}" y="${fmt(y1 + (x1 === x2 ? w * 20 : w * 7))}" style="font:${fmt(w * 16)}px Arial;fill:#555">✂</text></g>`);
+      // charte : trait bleu de 12 px (pour 2480 px de large), tirets arrondis
+      const w = CUT.width * page.width / 2480;
+      parts.push(`<g class="cut"><line x1="${fmt(x1)}" y1="${fmt(y1)}" x2="${fmt(x2)}" y2="${fmt(y2)}" stroke="${CUT.color}" stroke-width="${fmt(w)}" stroke-linecap="round" stroke-dasharray="${CUT.dash.map((d) => fmt(d * w)).join(",")}"/></g>`);
     }
   return { defs: c.defs.join(""), body: parts.join("") };
 }

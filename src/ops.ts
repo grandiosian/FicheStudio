@@ -64,7 +64,7 @@ export function copySelection() {
 
 export function paste(offset = 30) {
   if (!clipboard) return;
-  const layer = store.layer();
+  const layer = store.drawLayer();
   const L = store.cumulative(layer);
   store.commit(() => {
     const ids: string[] = [];
@@ -209,7 +209,7 @@ export function distribute(boxes: Map<string, Box>, axis: "h" | "v") {
 
 /** Ajoute un nœud créé en coordonnées de page dans le calque actif. */
 export function addToLayer(n: SceneNode) {
-  const layer = store.layer();
+  const layer = store.drawLayer();
   const L = store.cumulative(layer);
   n.transform = mul(inv(L), n.transform);
   store.commit(() => {

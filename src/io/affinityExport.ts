@@ -6,6 +6,7 @@ import { masterAreas } from "../model";
 import { apply, mul, rotationOf, shapeToSubpaths } from "../geom";
 import { boundColor, computeNumbering, prepareText, varsFor } from "../templates";
 import { cutLines, masterLayerMatrix } from "../render";
+import { CUT } from "../charte";
 import { assetBytes } from "../assets";
 
 interface Ctx { vars: Record<string, string>; numbers: Map<Paragraph, string> }
@@ -103,7 +104,7 @@ async function flatten(doc: Doc, n: SceneNode, parent: Mat, cx: Ctx): Promise<It
       return { k: "path", ...common, sub, fill: paintColor(n.fill, boundColor(n.bind?.fill, cx.vars)), stroke: xstroke(n.stroke, sc, boundColor(n.bind?.stroke, cx.vars)) };
     }
     case "text": {
-      const t = prepareText(n, cx.numbers, doc.numbering.suffix, cx.vars);
+      const t = prepareText(n, cx.numbers, doc.numbering, cx.vars);
       const sx = Math.hypot(M[0], M[1]), sy = Math.hypot(M[2], M[3]);
       const g = Math.sqrt(sx * sy);
       const angle = rotationOf(M);
@@ -156,11 +157,11 @@ export async function buildAffinityScript(doc: Doc, row: Record<string, string> 
     }
     const cuts = cutLines(p);
     if (cuts.length) {
-      const w = p.width / 600;
+      const w = CUT.width * p.width / 2480;
       layers.push({ k: "group", name: "Découpe", opacity: 1, hidden: false, children: cuts.map(([x1, y1, x2, y2]) => ({
         k: "path" as const, name: "Ligne de découpe", opacity: 1, hidden: false, fill: null,
         sub: [{ closed: false, pts: [[0, x1, y1], [0, x2, y2]] }],
-        stroke: { color: [85, 85, 85, 255] as Color, width: w, dash: [6, 4], cap: 0, join: 0 },
+        stroke: { color: [47, 87, 161, 255] as Color, width: w, dash: CUT.dash, cap: 1, join: 1 },
       })) });
     }
     pages.push({ name: p.name, w: p.width, h: p.height, bg: p.background ? hex(p.background) : null, layers });

@@ -74,6 +74,55 @@ export function zoomToFit() {
   applyView();
 }
 
+/** Page à pleine largeur, haut de page visible. */
+export function zoomToWidth() {
+  const r = stage.getBoundingClientRect();
+  const p = store.page;
+  view.zoom = (r.width - 60) / p.width;
+  view.x = 30;
+  view.y = 30;
+  applyView();
+}
+
+/** Cadre sur un objet ou un calque : zoom animé sur sa boîte englobante, puis bref repère. */
+let frameAnim = 0;
+export function zoomToBox(b: Box, pad = 48) {
+  const r = stage.getBoundingClientRect();
+  if (!r.width || b.w <= 0 || b.h <= 0) return zoomToFit();
+  const z1 = Math.max(0.02, Math.min(4, (r.width - pad * 2) / b.w, (r.height - pad * 2) / b.h));
+  const x1 = (r.width - b.w * z1) / 2 - b.x * z1, y1 = (r.height - b.h * z1) / 2 - b.y * z1;
+  const z0 = view.zoom, x0 = view.x, y0 = view.y;
+  // centre de l'écran interpolé en coordonnées page, zoom interpolé en échelle log
+  const c0 = { x: (r.width / 2 - x0) / z0, y: (r.height / 2 - y0) / z0 };
+  const c1 = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+  const t0 = performance.now(), dur = 320, id = ++frameAnim;
+  const step = (now: number) => {
+    if (id !== frameAnim) return;
+    const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 3);
+    const z = z0 * Math.pow(z1 / z0, e);
+    const cx = c0.x + (c1.x - c0.x) * e, cy = c0.y + (c1.y - c0.y) * e;
+    view.zoom = z; view.x = r.width / 2 - cx * z; view.y = r.height / 2 - cy * z;
+    if (t >= 1) { view.zoom = z1; view.x = x1; view.y = y1; }
+    applyView();
+    if (t < 1) requestAnimationFrame(step); else flashFrame(b);
+  };
+  requestAnimationFrame(step);
+}
+
+function flashFrame(b: Box) {
+  const f = document.createElement("div");
+  f.className = "frame-flash";
+  Object.assign(f.style, { left: `${view.x + b.x * view.zoom}px`, top: `${view.y + b.y * view.zoom}px`, width: `${b.w * view.zoom}px`, height: `${b.h * view.zoom}px` });
+  stage.appendChild(f);
+  setTimeout(() => f.remove(), 900);
+}
+
+/** Cadre sur l'élément donné (calque, groupe, objet). */
+export function frameNode(id: string) {
+  const b = nodeBox(id);
+  if (b) zoomToBox(b); else zoomToFit();
+}
+
 export function zoomBy(f: number, at?: Vec) {
   const r = stage.getBoundingClientRect();
   const c = at ?? { x: r.width / 2, y: r.height / 2 };
@@ -316,6 +365,7 @@ function onMove(e: PointerEvent) {
 function onUp(e: PointerEvent) {
   const d = drag;
   drag = null;
+  previewBase = null;
   guides = { x: [], y: [] };
   if (!d) return;
   switch (d.kind) {
@@ -375,7 +425,12 @@ export function setTool(t: typeof store.tool) {
 
 // ------------------------------------------------------------------ aperçu et validation des transformations
 
+/** Boîtes de la sélection mesurées avant l'aperçu d'une transformation : pendant le glisser, le DOM
+ *  est déjà déplacé, le remesurer puis appliquer M une seconde fois décalait les poignées (×2). */
+let previewBase: Map<string, Box> | null = null;
+
 function previewTransform(M: Mat) {
+  previewBase ??= selectionBoxes();
   for (const id of store.selection) {
     const el = content.querySelector(`[data-id="${id}"]`);
     const f = store.find(id);
@@ -528,14 +583,15 @@ export function drawOverlay(preview?: Mat) {
     const b = nodeBox(store.scope);
     if (b) { const s = toScreen(b); el("rect", { x: s.x - 4, y: s.y - 4, width: b.w * view.zoom + 8, height: b.h * view.zoom + 8, class: "ov-scope" }); }
   }
-  const boxes = selectionBoxes();
+  const boxes = preview && previewBase ? previewBase : selectionBoxes();
   if (store.tool !== "node") {
     for (const b of boxes.values()) {
       const bb = preview ? boxOfPoints([apply(preview, b), apply(preview, { x: b.x + b.w, y: b.y + b.h }), apply(preview, { x: b.x + b.w, y: b.y }), apply(preview, { x: b.x, y: b.y + b.h })]) : b;
       const s = toScreen(bb);
       el("rect", { x: s.x, y: s.y, width: bb.w * view.zoom, height: bb.h * view.zoom, class: "ov-item" });
     }
-    let all = selectionBox();
+    let all: Box | null = null;
+    for (const b of boxes.values()) all = all ? boxOfPoints([{ x: all.x, y: all.y }, { x: all.x + all.w, y: all.y + all.h }, { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y + b.h }]) : b;
     if (all && preview) all = boxOfPoints([apply(preview, all), apply(preview, { x: all.x + all.w, y: all.y + all.h }), apply(preview, { x: all.x + all.w, y: all.y }), apply(preview, { x: all.x, y: all.y + all.h })]);
     if (all && !store.editingText) {
       const s = toScreen(all), w = all.w * view.zoom, h = all.h * view.zoom;

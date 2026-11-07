@@ -1,9 +1,9 @@
 // Panneaux latéraux : pages, calques, propriétés, disposition, données.
 import { store } from "./store";
-import { selectionBoxes, render as renderCanvas, zoomToFit } from "./canvas";
+import { selectionBoxes, render as renderCanvas, zoomToFit, frameNode } from "./canvas";
 import {
   newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
-  type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page,
+  type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page, type GroupNode,
 } from "./model";
 import { mul, rotateAt, rotationOf, scaleAt, translate, boxOfPoints, type Box } from "./geom";
 import {
@@ -12,10 +12,14 @@ import {
 } from "./ops";
 import { isEditingText, styleCommand, insertAtCaret } from "./textedit";
 import { findVars, parseCsv, SCHEMES } from "./templates";
+import { refreshCompetences } from "./competences";
+import { renderPage } from "./render";
+import { charteMasters, makeTable, applyTemplate, templateFor, TEMPLATES, TEMPLATE_PREFIX } from "./charte";
+import { variantOf, PREFS, palette, TEXT_STYLES, applyTextStyle } from "./charte";
 import { atelierMaster, builtinItems, deleteItem, emptyMaster, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
 import { embedAsset, relinkImage, canLinkFiles } from "./assets";
 import { viewCenter } from "./canvas";
-import { layerPagesDialog } from "./layerpages";
+import { layerPagesDialog, layerKind } from "./layerpages";
 import { inv } from "./geom";
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -31,7 +35,8 @@ const n1 = (v: number) => (Math.round(v * 10) / 10).toString();
 const FONTS = ["Arial", "Arial Narrow", "Arial Black", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Courier New", "Comic Sans MS", "Avenir Next", "Futura", "Gill Sans", "Open Sans", "Roboto", "Montserrat", "Lato", "OpenDyslexic"];
 
 export function initPanels() {
-  store.on(() => refresh());
+  // pendant un réglage en direct (sélecteur de couleur), le panneau ne bouge pas
+  store.on((why) => { if (why !== "live") refresh(); });
   document.addEventListener("textedit", () => refreshProps());
   refresh();
 }
@@ -40,6 +45,7 @@ function refresh() {
   refreshPages();
   refreshLayers();
   refreshLibrary();
+  refreshCompetences(insertNodes);
   refreshProps();
   refreshData();
 }
@@ -58,7 +64,47 @@ function nextPage(cur: Page, kind: SheetKind = cur.kind ?? "fiche"): Page {
   p.kind = kind;
   p.sections = cur.sections; p.split = cur.split; p.master = cur.master; p.masterMode = cur.masterMode; p.background = cur.background;
   p.fields = { ...(cur.fields ?? {}) };
+  // charte : découpe seulement sur les feuilles d'atelier, gabarit selon le type, couleur d'étiquette du calque
+  if (kind !== "fiche") p.sections = 1;
+  for (const l of p.layers) l.tag ??= SHEET_KINDS[kind].tag;
+  // document à la charte : le modèle est copié dans le calque de la nouvelle feuille
+  if (store.doc.charte) {
+    if (p.master && isCharteMaster(p.master)) p.master = null;
+    for (const l of p.layers) applyTemplate(l, templateFor(kind), kind);
+  }
   return p;
+}
+
+const isCharteMaster = (id: string) => !!store.doc.masters.find((m) => m.id === id && m.name.startsWith("Charte · "));
+
+/** Type de feuille d'un calque de page, d'après son nom (P01, R02, E01…) ou la feuille. */
+function kindOfLayer(l: GroupNode, page: Page): SheetKind {
+  const k = layerKind(l.name);
+  const of: Record<string, SheetKind> = { peda: "peda", prof: "prof", page: "fiche", ressource: "ressource", synthese: "synthese", eval: "eval", evalres: "evalres" };
+  return of[k] ?? page.kind ?? "fiche";
+}
+
+/** Copie les modèles de la charte dans chaque calque de page ; les gabarits de la charte sont retirés. */
+function copyCharteToLayers() {
+  let n = 0;
+  store.commit(() => {
+    const d = store.doc;
+    d.charte ??= PREFS.variante;
+    let first = true;
+    for (const p of d.pages) {
+      if (p.master && isCharteMaster(p.master)) p.master = null;
+      for (const l of p.layers) {
+        const kind = kindOfLayer(l, p);
+        applyTemplate(l, templateFor(kind, first && kind === "fiche"), kind);
+        if (kind === "fiche") first = false;
+        l.tag ??= SHEET_KINDS[kind].tag;
+        n++;
+      }
+      if ((p.kind ?? "fiche") !== "fiche") p.sections = 1;
+    }
+    d.masters = d.masters.filter((m) => !m.name.startsWith("Charte · "));
+  }, "doc");
+  document.dispatchEvent(new CustomEvent("status", { detail: `Modèle de la charte copié dans ${n} calque(s) (groupe « ${TEMPLATE_PREFIX}… », verrouillé).` }));
 }
 
 function refreshPages() {
@@ -72,6 +118,7 @@ function refreshPages() {
       <button data-a="l2p" title="Calques → feuilles : faire une feuille de chaque calque choisi" ${store.editingMaster ? "disabled" : ""}>⇉</button></div>
     <ol class="page-list">${store.doc.pages.map((p, i) => `<li class="${!store.editingMaster && i === store.pageIndex ? "on" : ""}" data-i="${i}"><span class="num">${i + 1}</span><span class="kind-tag k-${p.kind ?? "fiche"}" title="${SHEET_KINDS[p.kind ?? "fiche"].label}">${SHEET_KINDS[p.kind ?? "fiche"].prefix}</span><span class="nm">${esc(p.name)}</span><span class="badge">${(p.sections ?? 1) > 1 ? `✂${p.sections}` : ""}${p.master ? " ▤" : ""}</span></li>`).join("")}</ol>
     <div class="panel-head sub"><h3>Gabarits</h3>
+      <button data-a="m-charte" title="Copier le modèle de la charte dans chaque calque de page (1re feuille, feuille d'atelier, ressource, synthèse, évaluation selon le nom du calque : P01, R01, S01, E01…)">＋ Charte</button>
       <button data-a="m-atelier" title="Nouveau gabarit « Atelier » (barres haut et bas)">＋ Atelier</button>
       <button data-a="m-empty" title="Nouveau gabarit vide">＋</button></div>
     <ul class="page-list">${ms.map((m) => `<li class="${store.editingMaster === m.id ? "on" : ""}" data-m="${m.id}"><span class="num">▤</span><span class="nm">${esc(m.name)}</span>
@@ -147,15 +194,76 @@ function refreshPages() {
     const m = atelier ? atelierMaster(r.w, r.h) : emptyMaster(r.w, r.h);
     store.commit(() => {
       store.doc.masters.push(m);
-      // appliqué à la feuille courante (et aux feuilles sans gabarit)
-      store.doc.pages.forEach((x) => { if (!x.master) x.master = m.id; });
+      // appliqué aux feuilles sans gabarit, sauf celles qui portent plusieurs feuilles en calques
+      // (fichiers Affinity P01, R01… : le gabarit passerait sous chacun des calques)
+      store.doc.pages.forEach((x) => { if (!x.master && x.layers.length <= 1) x.master = m.id; });
     });
   };
   el.querySelector<HTMLElement>('[data-a="m-atelier"]')!.onclick = () => addMaster(true);
+  el.querySelector<HTMLElement>('[data-a="m-charte"]')!.onclick = () => copyCharteToLayers();
   el.querySelector<HTMLElement>('[data-a="m-empty"]')!.onclick = () => addMaster(false);
 }
 
 // ------------------------------------------------------------------ calques
+
+/** Menu contextuel d'un calque ou d'un objet du panneau Calques. */
+function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
+  document.querySelector(".pop-menu")?.remove();
+  const m = document.createElement("div");
+  m.className = "pop-menu menu-body";
+  const g = node.type === "group" ? node : null;
+  const tpl = isLayer && g ? g.children.find((c) => c.name.startsWith(TEMPLATE_PREFIX)) : undefined;
+  const kind = isLayer && g ? kindOfLayer(g, store.page) : "fiche";
+  m.innerHTML = `<button data-m="zoom">Zoom au plus près</button>
+    ${g ? `<button data-m="selall">Sélectionner le contenu</button>` : ""}
+    <button data-m="rename">Renommer…</button>
+    <button data-m="eye">${node.visible ? "Masquer" : "Afficher"}</button>
+    <button data-m="lock">${node.locked ? "Déverrouiller" : "Verrouiller"}</button>
+    ${isLayer ? `<hr><div class="menu-title">Modèle de la charte</div>${TEMPLATES.map((t, i) => `<button data-tpl="${i}">${tpl?.name === TEMPLATE_PREFIX + t ? "✓ " : ""}${t}</button>`).join("")}
+      ${tpl ? `<button data-m="untpl">Retirer le modèle</button>` : ""}` : ""}`;
+  document.body.appendChild(m);
+  m.style.left = `${Math.min(x, innerWidth - m.offsetWidth - 8)}px`;
+  m.style.top = `${Math.min(y, innerHeight - m.offsetHeight - 8)}px`;
+  const close = () => { m.remove(); document.removeEventListener("mousedown", off); };
+  const off = (ev: MouseEvent) => { if (!m.contains(ev.target as Node)) close(); };
+  setTimeout(() => document.addEventListener("mousedown", off), 0);
+  m.onclick = (ev) => {
+    const b = (ev.target as HTMLElement).closest("button");
+    if (!b) return;
+    close();
+    const a = b.dataset.m;
+    if (a === "zoom") frameNode(node.id);
+    else if (a === "selall" && g) {
+      if (isLayer) { store.activeLayer = g.id; store.scope = null; }
+      store.select(g.children.filter((c) => !c.locked && c.visible).map((c) => c.id));
+    } else if (a === "rename") { const name = prompt("Nom", node.name); if (name) store.commit(() => { node.name = name; }); }
+    else if (a === "eye") store.commit(() => { node.visible = !node.visible; });
+    else if (a === "lock") store.commit(() => { node.locked = !node.locked; });
+    else if (a === "untpl" && g) store.commit(() => { g.children = g.children.filter((c) => !c.name.startsWith(TEMPLATE_PREFIX)); });
+    else if (b.dataset.tpl && g) store.commit(() => { applyTemplate(g, +b.dataset.tpl!, kind); store.doc.charte ??= PREFS.variante; });
+  };
+}
+
+const svgIcon = (d: string) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const EYE_ON = svgIcon(`<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>`);
+const EYE_OFF = svgIcon(`<path d="M2 6.5c1.2 1.6 3.3 3 6 3s4.8-1.4 6-3"/><path d="M4.2 8.7 3 10.3M8 9.5v1.8M11.8 8.7l1.2 1.6"/>`);
+const LOCK_ON = svgIcon(`<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>`);
+const LOCK_OFF = svgIcon(`<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7"/>`);
+
+/** Œil / cadenas : appuyer puis glisser sur d'autres lignes applique le même état (une seule annulation). */
+let toggleDrag: { key: "visible" | "locked"; value: boolean } | null = null;
+function toggleTo(id: string, key: "visible" | "locked", value: boolean) {
+  const node = store.page.layers.find((l) => l.id === id) ?? store.find(id)?.node;
+  if (!node || node[key] === value) return;
+  store.live(`toggle:${key}`, () => { node[key] = value; });
+  const btn = document.querySelector<HTMLElement>(`#layers li[data-id="${id}"] [data-a="${key === "visible" ? "eye" : "lock"}"]`);
+  if (btn) {
+    btn.innerHTML = key === "visible" ? (value ? EYE_ON : EYE_OFF) : value ? LOCK_ON : LOCK_OFF;
+    btn.classList.toggle(key === "visible" ? "off" : "on", key === "visible" ? !value : value);
+    btn.closest("li")!.classList.toggle("hidden", key === "visible" && !value);
+  }
+}
+document.addEventListener("mouseup", () => { if (toggleDrag) { toggleDrag = null; store.endLive(); } });
 
 const ICON: Record<string, string> = { group: "▣", shape: "◆", path: "✎", text: "T", image: "🖼" };
 const STEP_ICON = `<span class="step-ic" title="Étape de correction">⏵</span>`;
@@ -177,8 +285,8 @@ function refreshLayers() {
     const hasKids = kids.length > 0 || (n.type === "group" && !!n.mask);
     rows.push(`<li class="${sel.has(n.id) ? "sel" : ""} ${isLayer ? "layer" : ""} ${isLayer && n.id === active ? "active" : ""} ${n.visible ? "" : "hidden"}" data-id="${n.id}" style="--d:${depth};--row-tag:${n.tag ?? "transparent"}">
       <button class="tw" data-a="tw">${hasKids ? (expanded.has(n.id) ? "▾" : "▸") : ""}</button>
-      <button class="eye" data-a="eye" title="Afficher/masquer">${n.visible ? "👁" : "◌"}</button>
-      <button class="lock" data-a="lock" title="Verrouiller">${n.locked ? "🔒" : "·"}</button>
+      <button class="eye ${n.visible ? "" : "off"}" data-a="eye" title="${n.visible ? "Masquer" : "Afficher"} (glisser pour plusieurs)">${n.visible ? EYE_ON : EYE_OFF}</button>
+      <button class="lock ${n.locked ? "on" : ""}" data-a="lock" title="${n.locked ? "Déverrouiller" : "Verrouiller"} (glisser pour plusieurs)">${n.locked ? LOCK_ON : LOCK_OFF}</button>
       ${isLayer || n.type === "group" ? `<button class="tag" data-a="tag" title="Couleur du calque / groupe" style="--tag:${n.tag ?? "transparent"}"></button>` : ""}
       <span class="ic">${isLayer ? (n.type === "group" && n.anchor && n.anchor !== "none" ? (n.anchor === "top" ? "⤒" : "⤓") : "≡") : n.type === "group" && n.mask ? "◐" : ICON[n.type]}</span>
       <span class="nm">${esc(n.name || "")}</span>${n.step ? STEP_ICON : ""}</li>`);
@@ -198,22 +306,41 @@ function refreshLayers() {
   el.querySelectorAll<HTMLElement>("li").forEach((li) => {
     const id = li.dataset.id!;
     const isLayer = li.classList.contains("layer");
+    li.querySelectorAll<HTMLElement>('[data-a="eye"], [data-a="lock"]').forEach((btn) => {
+      const key = btn.dataset.a === "eye" ? "visible" : "locked";
+      btn.onmousedown = (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const node = isLayer ? store.page.layers.find((l) => l.id === id) : store.find(id)?.node;
+        if (!node) return;
+        toggleDrag = { key, value: !node[key] };
+        toggleTo(id, key, toggleDrag.value);
+      };
+      btn.onmouseenter = () => { if (toggleDrag?.key === key) toggleTo(id, key, toggleDrag.value); };
+      btn.ondblclick = (e) => e.stopPropagation(); // pas de cadrage en cliquant vite sur l'œil
+    });
+    li.oncontextmenu = (e) => {
+      e.preventDefault();
+      const node = isLayer ? store.page.layers.find((l) => l.id === id) : store.find(id)?.node;
+      if (node) layerMenu(e.clientX, e.clientY, node, isLayer);
+    };
     li.onclick = (e) => {
-      const a = (e.target as HTMLElement).dataset.a;
+      const a = (e.target as HTMLElement).closest<HTMLElement>("[data-a]")?.dataset.a;
       const node = isLayer ? store.page.layers.find((l) => l.id === id)! : store.find(id)?.node;
       if (!node) return;
       if (a === "tw") { expanded.has(id) ? expanded.delete(id) : expanded.add(id); refreshLayers(); return; }
-      if (a === "eye") { store.commit(() => { node.visible = !node.visible; }); return; }
-      if (a === "lock") { store.commit(() => { node.locked = !node.locked; }); return; }
+      if (a === "eye" || a === "lock") return; // géré à l'appui (voir onmousedown)
       if (a === "tag") { tagPicker(e.target as HTMLElement, node.tag ?? null, (c) => store.commit(() => { node.tag = c; })); return; }
       if (isLayer) { store.activeLayer = id; store.selection = []; store.emit("selection"); refreshLayers(); return; }
       const f = store.find(id);
       store.scope = f && !store.page.layers.includes(f.parent) ? f.parent.id : null;
       store.select(e.shiftKey ? [...new Set([...store.selection, id])] : [id]);
     };
-    li.ondblclick = () => {
+    li.ondblclick = (e) => {
       const node = isLayer ? store.page.layers.find((l) => l.id === id)! : store.find(id)?.node;
       if (!node) return;
+      // double-clic : cadrer l'élément ; ⌥ double-clic : renommer
+      if (!e.altKey) { frameNode(id); return; }
       const name = prompt("Nom", node.name);
       if (name !== null) store.commit(() => { node.name = name; });
     };
@@ -279,6 +406,12 @@ function placeItem(item: LibItem): { M: [number, number, number, number, number,
   return { M: [s, 0, 0, s, r.x + x * s, c.y] };
 }
 
+/** Insère des objets construits à la volée (compétences…), au centre de la vue. */
+export function insertNodes(name: string, nodes: SceneNode[], x: number) {
+  insertItem({ id: uid(), name, kind: "objects", place: { x, y: 0, from: "center" }, nodes, assets: {} });
+}
+export const refreshCompetencesPanel = () => refreshCompetences(insertNodes);
+
 function insertItem(item: LibItem) {
   store.commit(() => {
     const nodes = instantiate(item, store.doc);
@@ -292,7 +425,7 @@ function insertItem(item: LibItem) {
       store.selection = [];
       return;
     }
-    const layer = store.layer();
+    const layer = store.drawLayer();
     const L = store.cumulative(layer);
     const ids: string[] = [];
     for (const n of nodes) {
@@ -341,7 +474,7 @@ async function saveSelectionToLibrary(kind: "objects" | "layer") {
 function refreshLibrary() {
   const el = document.querySelector<HTMLElement>("#library");
   if (!el) return;
-  const items = [...builtinItems(), ...userLib];
+  const items = [...builtinItems(variantOf(store.doc)), ...userLib];
   el.innerHTML = `<div class="panel-head"><h3>Bibliothèque</h3>
       <button data-a="save-sel" title="Ajouter la sélection à la bibliothèque">＋ Sélection</button>
       <button data-a="save-layer" title="Enregistrer le calque actif comme modèle">＋ Calque</button></div>
@@ -414,7 +547,7 @@ function refreshProps() {
   const el = $("#props");
   const nodes = store.selected();
   const editing = isEditingText();
-  if (!nodes.length) { el.innerHTML = docProps(); bindDocProps(el); return; }
+  if (!nodes.length) { el.innerHTML = docProps(); bindDocProps(el); if (!store.editingMaster) tableTool(el, true); return; }
   const boxes = [...selectionBoxes().values()];
   const b = unionBox(boxes) ?? { x: 0, y: 0, w: 0, h: 0 };
   const one = nodes.length === 1 ? nodes[0] : null;
@@ -430,9 +563,9 @@ function refreshProps() {
   if (vec.length) {
     const v = vec[0];
     const dashKind = !v.stroke.dash ? "solid" : v.stroke.dash[0] < 0.5 ? "dot" : "dash";
-    parts.push(`<section><h4>Remplissage</h4>${paintEditor("fill", v.fill)}
+    parts.push(`<section><h4>Remplissage</h4>${paintEditor("fill", v.fill)}${swatches("fill")}
       <label class="chk"><input type="checkbox" data-k="bindfill" ${v.bind?.fill === "couleur_niveau" ? "checked" : ""}> Couleur du niveau de classe (pastille)</label></section>
-      <section><h4>Contour</h4>${paintEditor("stroke", v.stroke.paint)}
+      <section><h4>Contour</h4>${paintEditor("stroke", v.stroke.paint)}${swatches("stroke")}
       <div class="grid2">${field("Épaisseur (pt)", "sw", n1(toPt(v.stroke.width)))}
       <label class="fld"><span>Style</span><select data-k="dash">
         <option value="solid" ${dashKind === "solid" ? "selected" : ""}>Plein</option>
@@ -457,9 +590,11 @@ function refreshProps() {
     const r = texts.length ? firstRun(texts[0]) : null;
     const p = texts[0]?.paragraphs[0];
     parts.push(`<section class="keep-editor"><h4>Texte${editing ? " — sélection" : ""}</h4>
+      <label class="fld wide"><span>Style de la charte</span><select data-k="tstyle"><option value="">—</option>${TEXT_STYLES.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join("")}</select></label>
       <label class="fld wide"><span>Police</span><input list="fontlist" data-k="font" value="${esc(r?.font ?? "Arial")}"></label>
       <datalist id="fontlist">${FONTS.map((f) => `<option value="${f}">`).join("")}</datalist>
       <div class="grid2">${field("Corps (pt)", "fsize", n1(toPt(r?.size ?? 50)))}<label class="fld"><span>Couleur</span><input type="color" data-k="fcolor" value="${r?.color ?? "#000000"}"></label>
+      </div>${swatches("fcolor")}<div class="grid2">
       ${field("Interligne (×)", "lh", String(Math.round((p?.lineHeight ?? 1) * 100) / 100))}
       <label class="fld"><span>Titre numéroté</span><select data-k="level">${[0, 1, 2, 3].map((l) => `<option value="${l}" ${(p?.level ?? 0) === l ? "selected" : ""}>${l ? `Niveau ${l}` : "Texte courant"}</option>`).join("")}</select></label>
       ${field("Espace avant (pt)", "sb", n1(toPt(p?.spaceBefore ?? 0)))}${field("Espace après (pt)", "sa", n1(toPt(p?.spaceAfter ?? 0)))}
@@ -481,18 +616,187 @@ function refreshProps() {
     <p class="hint">${nodes.length === 1 ? "Un seul objet : alignement sur la page." : "Plusieurs objets : alignement sur la sélection."}</p></section>`);
   el.innerHTML = parts.join("");
   bindProps(el, nodes, b);
+  tableTool(el, false);
+}
+
+// ------------------------------------------------------------------ tableau
+
+const tableOpts = { rows: 4, cols: 3, header: true, headerCol: false, widthMm: 193.4, cellHmm: 8 };
+
+// ------------------------------------------------------------------ modèles et blocs (barre d'outils)
+
+/** Vignette SVG de nœuds, rendus avec les variables du document ; cadrée sur leur contenu sauf si page. */
+function thumb(nodes: SceneNode[], page?: { w: number; h: number }): string {
+  const layer = newLayer("aperçu");
+  layer.children = nodes;
+  // sans fond de page : la boîte englobante des blocs se limite à leur contenu
+  const fake = { ...newPage(page?.w ?? 2480, page?.h ?? 3508, "aperçu"), background: null, layers: [layer], sections: 1 } as Page;
+  const { defs, body } = renderPage(store.doc, fake, { cutMarks: false });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" ${page ? `viewBox="0 0 ${page.w} ${page.h}"` : ""} preserveAspectRatio="xMidYMid meet"><defs>${defs}</defs>${page ? `<rect width="${page.w}" height="${page.h}" fill="#fff"/>` : ""}${body}</svg>`;
+  return svg;
+}
+
+/** Cadre les vignettes de blocs sur leur boîte englobante, une fois dans le document. */
+function fitThumbs(root: HTMLElement) {
+  root.querySelectorAll<SVGSVGElement>(".tpl-card.block svg").forEach((svg) => {
+    try {
+      const b = svg.getBBox();
+      const pad = Math.max(b.width, b.height) * 0.04 + 4;
+      svg.setAttribute("viewBox", `${b.x - pad} ${b.y - pad} ${b.width + pad * 2} ${b.height + pad * 2}`);
+    } catch { /* pas encore affichée */ }
+  });
+}
+
+/** Barre d'outils › Modèles : modèles de page à copier dans le calque actif, titres et blocs de la charte. */
+export function templatePicker(anchor: HTMLElement) {
+  document.querySelector(".pop-menu")?.remove();
+  const m = document.createElement("div");
+  m.className = "pop-menu menu-body tpl-picker";
+  const masters = charteMasters();
+  const layer = store.layer();
+  const kind = kindOfLayer(layer, store.page);
+  const current = layer.children.find((c) => c.name.startsWith(TEMPLATE_PREFIX))?.name;
+  const items = builtinItems(variantOf(store.doc)).filter((it) => it.name.startsWith("Charte · "));
+  const headings = items.filter((it) => /titre de niveau/.test(it.name));
+  const blocks = items.filter((it) => !/titre de niveau/.test(it.name));
+  const card = (cls: string, attr: string, svg: string, label: string, on = false) =>
+    `<button class="tpl-card ${cls} ${on ? "on" : ""}" ${attr} title="${esc(label)}">${svg}<span>${esc(label)}</span></button>`;
+  m.innerHTML = `<div class="tpl-head"><b>Modèles de la charte</b><span class="spacer"></span><input type="search" placeholder="Filtrer…" class="tpl-filter"></div>
+    <div class="tpl-scroll">
+    <div class="menu-title">Modèle de page → calque « ${esc(layer.name)} »${current ? " (remplace le modèle en place)" : ""}</div>
+    <div class="tpl-grid pages">${masters.map((ms, i) => card("page", `data-tpl="${i}"`, thumb(ms.layers.flatMap((l) => l.children), { w: ms.width, h: ms.height }), TEMPLATES[i], current === TEMPLATE_PREFIX + TEMPLATES[i] || (!current && i === templateFor(kind)))).join("")}</div>
+    <div class="menu-title">Titres · ${esc(variantOf(store.doc).label)}</div>
+    <div class="tpl-grid">${headings.map((it) => card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name.replace(/^Charte · /, ""))).join("")}</div>
+    <div class="menu-title">Blocs</div>
+    <div class="tpl-grid">${blocks.map((it) => card("block", `data-it="${it.id}"`, thumb(structuredClone(it.nodes)), it.name.replace(/^Charte · /, ""))).join("")}</div>
+    </div>`;
+  const r = anchor.getBoundingClientRect();
+  m.style.left = `${r.right + 6}px`;
+  document.body.appendChild(m);
+  m.style.top = `${Math.max(8, Math.min(r.top, innerHeight - m.offsetHeight - 8))}px`;
+  requestAnimationFrame(() => fitThumbs(m));
+  const close = () => { m.remove(); document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc_); };
+  const off = (e: MouseEvent) => { if (!m.contains(e.target as Node) && !anchor.contains(e.target as Node)) close(); };
+  const esc_ = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+  setTimeout(() => { document.addEventListener("mousedown", off); document.addEventListener("keydown", esc_); }, 0);
+  const filter = m.querySelector<HTMLInputElement>(".tpl-filter")!;
+  filter.oninput = () => {
+    const q = filter.value.toLowerCase();
+    m.querySelectorAll<HTMLElement>(".tpl-card").forEach((c) => { c.hidden = !!q && !c.title.toLowerCase().includes(q); });
+  };
+  filter.focus();
+  m.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>(".tpl-card");
+    if (!b) return;
+    close();
+    if (b.dataset.tpl) {
+      const i = +b.dataset.tpl;
+      store.commit(() => { applyTemplate(store.layer(), i, kind); store.doc.charte ??= PREFS.variante; });
+      document.dispatchEvent(new CustomEvent("status", { detail: `Modèle « ${TEMPLATES[i]} » copié dans le calque « ${layer.name} ».` }));
+    } else {
+      const it = items.find((x) => x.id === b.dataset.it);
+      if (it) insertItem(it);
+    }
+  };
+}
+
+/** Barre d'outils › Tableau : grille à survoler pour choisir rangées × colonnes, puis clic. */
+export function tablePicker(anchor: HTMLElement) {
+  document.querySelector(".pop-menu")?.remove();
+  const o = tableOpts, R = 10, C = 8;
+  const m = document.createElement("div");
+  m.className = "pop-menu menu-body table-picker";
+  m.innerHTML = `<div class="menu-title">Tableau <span class="tp-size">${o.rows} × ${o.cols}</span></div>
+    <div class="tp-grid" style="grid-template-columns:repeat(${C},18px)">${Array.from({ length: R * C }, (_, i) => `<span data-r="${Math.floor(i / C) + 1}" data-c="${(i % C) + 1}"></span>`).join("")}</div>
+    <label class="chk"><input type="checkbox" data-t="header" ${o.header ? "checked" : ""}> Rangée de titre</label>
+    <label class="chk"><input type="checkbox" data-t="headerCol" ${o.headerCol ? "checked" : ""}> Colonne de titre</label>
+    <p class="hint">Largeur ${n1(o.widthMm)} mm, cases de ${n1(o.cellHmm)} mm : réglables dans Propriétés › Tableau.</p>`;
+  const r = anchor.getBoundingClientRect();
+  m.style.left = `${r.right + 6}px`; m.style.top = `${r.top}px`;
+  document.body.appendChild(m);
+  const cells = [...m.querySelectorAll<HTMLElement>(".tp-grid span")];
+  const show = (rr: number, cc: number) => {
+    cells.forEach((c) => c.classList.toggle("on", +c.dataset.r! <= rr && +c.dataset.c! <= cc));
+    m.querySelector(".tp-size")!.textContent = `${rr} × ${cc}`;
+  };
+  show(o.rows, o.cols);
+  cells.forEach((c) => {
+    c.onmouseenter = () => show(+c.dataset.r!, +c.dataset.c!);
+    c.onclick = () => {
+      o.rows = +c.dataset.r!; o.cols = +c.dataset.c!;
+      close();
+      const t = makeTable({ rows: o.rows, cols: o.cols, header: o.header, headerCol: o.headerCol, width: fromMm(o.widthMm), cellH: fromMm(o.cellHmm) });
+      insertNodes(t.name, [t], 141);
+    };
+  });
+  m.querySelectorAll<HTMLInputElement>("input[data-t]").forEach((i) => (i.onchange = () => { o[i.dataset.t as "header" | "headerCol"] = i.checked; }));
+  const close = () => { m.remove(); document.removeEventListener("mousedown", off); };
+  const off = (e: MouseEvent) => { if (!m.contains(e.target as Node) && e.target !== anchor) close(); };
+  setTimeout(() => document.addEventListener("mousedown", off), 0);
+}
+
+/** Section « Tableau » du panneau Propriétés : insère un tableau à la charte. */
+function tableTool(el: HTMLElement, top: boolean) {
+  const o = tableOpts;
+  const sec = document.createElement("section");
+  sec.className = "table-tool";
+  sec.innerHTML = `<h4>Tableau</h4>
+    <div class="grid2">${field("Rangées", "rows", String(o.rows))}${field("Colonnes", "cols", String(o.cols))}
+    ${field("Largeur (mm)", "widthMm", n1(o.widthMm))}${field("Hauteur des cases (mm)", "cellHmm", n1(o.cellHmm))}</div>
+    <label class="chk"><input type="checkbox" data-t="header" ${o.header ? "checked" : ""}> Rangée de titre</label>
+    <label class="chk"><input type="checkbox" data-t="headerCol" ${o.headerCol ? "checked" : ""}> Colonne de titre</label>
+    <button class="primary" data-t="add">＋ Ajouter le tableau</button>
+    <p class="hint">Calques : un dossier « Tableau », une rangée par groupe, chaque case = rectangle + texte. En-têtes bleu clair, contours bleus (charte).</p>`;
+  if (top) el.prepend(sec); else el.append(sec);
+  // les champs de saisie réutilisent field() : on les relit par leur data-k, sans passer par bindProps
+  sec.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => {
+    inp.onchange = () => {
+      const v = parseFloat(inp.value.replace(",", "."));
+      const k = inp.dataset.k as "rows" | "cols" | "widthMm" | "cellHmm";
+      if (!isNaN(v) && v > 0) o[k] = k === "rows" || k === "cols" ? Math.min(40, Math.round(v)) : v;
+    };
+    inp.onkeydown = (e) => { if (e.key === "Enter") inp.blur(); };
+  });
+  sec.querySelectorAll<HTMLInputElement>('input[data-t]').forEach((c) => (c.onchange = () => { o[c.dataset.t as "header" | "headerCol"] = c.checked; }));
+  sec.querySelector<HTMLElement>('[data-t="add"]')!.onclick = () => {
+    sec.querySelectorAll<HTMLInputElement>("[data-k]").forEach((i) => i.onchange?.(new Event("change")));
+    const t = makeTable({ rows: o.rows, cols: o.cols, header: o.header, headerCol: o.headerCol, width: fromMm(o.widthMm), cellH: fromMm(o.cellHmm) });
+    insertNodes(t.name, [t], 141);
+  };
+}
+
+/** Nuancier de la charte sous un sélecteur de couleur. */
+function swatches(target: "fill" | "stroke" | "fcolor") {
+  return `<div class="swatches" data-swfor="${target}" title="Couleurs de la charte">${palette().map((c) => `<button data-sw="${c.hex}" style="background:${c.hex}" title="${esc(c.name)}"></button>`).join("")}</div>`;
+}
+
+/** Branche un sélecteur de couleur sur le mode « en direct ». */
+function liveColor(inp: HTMLInputElement, key: string) {
+  const apply = inp.onchange as (() => void) | null;
+  if (!apply) return;
+  inp.oninput = () => {
+    liveKey = key;
+    try { apply(); } finally { liveKey = null; }
+  };
+  inp.onchange = () => { if (store.isLive()) store.endLive(); else apply(); };
+}
+
+/** Modification normale, ou « en direct » pendant qu'on fait glisser un sélecteur de couleur. */
+let liveKey: string | null = null;
+function mutate(fn: () => void) {
+  if (liveKey) store.live(liveKey, fn); else store.commit(fn);
 }
 
 function applyToVectors(fn: (n: ShapeNode | Extract<SceneNode, { type: "path" }>) => void) {
-  store.commit(() => { for (const n of store.selected()) if (n.type === "shape" || n.type === "path") fn(n); });
+  mutate(() => { for (const n of store.selected()) if (n.type === "shape" || n.type === "path") fn(n); });
 }
 
 function applyToParas(fn: (p: Paragraph) => void) {
-  store.commit(() => { for (const n of store.selected()) walk([n], (x) => { if (x.type === "text") x.paragraphs.forEach(fn); }); });
+  mutate(() => { for (const n of store.selected()) walk([n], (x) => { if (x.type === "text") x.paragraphs.forEach(fn); }); });
 }
 
 function applyToRuns(fn: (r: Run) => void) {
-  store.commit(() => {
+  mutate(() => {
     for (const n of store.selected()) {
       const targets: TextNode[] = [];
       walk([n], (x) => { if (x.type === "text") targets.push(x); });
@@ -541,9 +845,21 @@ function bindProps(el: HTMLElement, nodes: SceneNode[], b: Box) {
       else if (k === "sa" && !isNaN(num)) applyToParas((p) => { p.spaceAfter = fromPt(num); });
       else if (k === "li" && !isNaN(num)) applyToParas((p) => { p.leftIndent = fromMm(num); });
       else if (k === "fi" && !isNaN(num)) applyToParas((p) => { p.firstIndent = fromMm(num); });
+      else if (k === "tstyle") { const st = TEXT_STYLES.find((s) => s.id === v); if (st) applyToParas((p) => applyTextStyle(p, st)); }
       else if (k === "bindfill") applyToVectors((n) => { n.bind = (inp as HTMLInputElement).checked ? { ...n.bind, fill: "couleur_niveau" } : { ...n.bind, fill: undefined }; });
     };
     if (inp.tagName === "INPUT" && (inp as HTMLInputElement).type !== "color") inp.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") inp.blur(); });
+    // couleurs : application en direct pendant le glisser, un seul niveau d'annulation à la fin
+    if ((inp as HTMLInputElement).type === "color" && !isEditingText()) liveColor(inp as HTMLInputElement, `${inp.dataset.k}:${store.selection.join(",")}`);
+  });
+  el.querySelectorAll<HTMLElement>("[data-sw]").forEach((btn) => {
+    btn.onmousedown = (e) => { if (isEditingText()) e.preventDefault(); };
+    btn.onclick = () => {
+      const hex = btn.dataset.sw!, t = btn.closest<HTMLElement>("[data-swfor]")!.dataset.swfor;
+      if (t === "fill") applyToVectors((n) => { n.fill = solid(hex); });
+      else if (t === "stroke") applyToVectors((n) => { n.stroke.paint = solid(hex); if (n.stroke.width === 0) n.stroke.width = fromPt(1); });
+      else if (!styleCommand("color", hex)) applyToRuns((r) => { r.color = hex; });
+    };
   });
   el.querySelectorAll<HTMLElement>("[data-align]").forEach((btn) => {
     btn.onclick = () => alignSelection(selectionBoxes(), btn.dataset.align as "l", store.selection.length === 1 ? { x: 0, y: 0, w: store.page.width, h: store.page.height } : null);
@@ -600,7 +916,7 @@ function docProps() {
     <p class="hint">${d.dpi} ppp · ${d.pages.length} feuille(s)</p></section>
     <section><h4>Numérotation des titres</h4>
     <label class="fld wide"><span>Nomenclature</span><select data-n="scheme">${(Object.keys(SCHEMES) as (keyof typeof SCHEMES)[]).map((k) => `<option value="${k}" ${d.numbering.scheme === k ? "selected" : ""}>${SCHEMES[k].label}</option>`).join("")}</select></label>
-    <p class="hint">Exemple : ${esc(SCHEMES[d.numbering.scheme].example)}</p>
+    <p class="hint">Exemple : ${esc(SCHEMES[d.numbering.scheme].example)}${d.numbering.suffixes ? ` — variante de charte « ${esc(variantOf(d).label)} » (menu Charte › Variantes)` : ""}</p>
     <div class="grid2"><label class="fld"><span>Recommencer</span><select data-n="restart">
         <option value="doc" ${d.numbering.restart === "doc" ? "selected" : ""}>Jamais (tout le document)</option>
         <option value="page" ${d.numbering.restart === "page" ? "selected" : ""}>À chaque feuille</option>
@@ -644,19 +960,24 @@ function bindDocProps(el: HTMLElement) {
       if (k === "name") store.commit(() => { d.name = v || "Sans titre"; });
       if (k === "preset" && v) { const [w, h] = v.split("x").map(Number); store.commit(() => pages().forEach((p) => { p.width = Math.round(fromMm(w)); p.height = Math.round(fromMm(h)); })); zoomToFit(); }
       if (k === "pw" || k === "ph") { const num = parseFloat(v.replace(",", ".")); if (num > 0) store.commit(() => pages().forEach((p) => { p[k === "pw" ? "width" : "height"] = Math.round(fromMm(num)); })); }
-      if (k === "bg") store.commit(() => pages().forEach((p) => { p.background = v; }));
+      if (k === "bg") mutate(() => pages().forEach((p) => { p.background = v; }));
     };
   });
+  const bg = el.querySelector<HTMLInputElement>('[data-d="bg"]');
+  if (bg) liveColor(bg, "bg");
   el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-f]").forEach((inp) => {
     inp.onchange = () => store.commit(() => { d.fields[inp.dataset.f!] = inp.value; });
   });
   el.querySelectorAll<HTMLInputElement>("[data-lc]").forEach((inp) => {
-    inp.onchange = () => store.commit(() => { d.levelColors[inp.dataset.lc!] = inp.value; });
+    inp.onchange = () => mutate(() => { d.levelColors[inp.dataset.lc!] = inp.value; });
+    liveColor(inp, `lc:${inp.dataset.lc}`);
   });
   el.querySelectorAll<HTMLSelectElement>("[data-n]").forEach((inp) => {
     inp.onchange = () => store.commit(() => {
       const k = inp.dataset.n as "scheme" | "restart" | "suffix";
       (d.numbering as unknown as Record<string, string>)[k] = k === "suffix" ? inp.value.replace("\\t", "\t") : inp.value;
+      // réglage manuel : on quitte les séparateurs propres à la variante de charte
+      if (k !== "restart") { delete d.numbering.suffixes; delete d.numbering.prefix1; }
     });
   });
   el.querySelectorAll<HTMLInputElement>("[data-pf]").forEach((inp) => {

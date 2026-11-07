@@ -29,6 +29,7 @@ export function varsFor(doc: Doc, pageIndex: number, section = 0, row: Record<st
   const kind = page?.kind ?? "fiche";
   v.type_feuille = SHEET_KINDS[kind].label;
   v.entete ??= SHEET_KINDS[kind].entete;
+  v["résumé"] ??= "……";
   if (row) Object.assign(v, row);
   return v;
 }
@@ -120,11 +121,15 @@ export function computeNumbering(doc: Doc): Map<Paragraph, string> {
 }
 
 /** Texte prêt à composer : préfixes de numérotation puis variables remplacées. */
-export function prepareText(t: TextNode, numbers: Map<Paragraph, string> | null, suffix: string, vars: Record<string, string> | null): TextNode {
+export function prepareText(t: TextNode, numbers: Map<Paragraph, string> | null, nb: Numbering, vars: Record<string, string> | null): TextNode {
   const paragraphs = t.paragraphs.map((p) => {
     let runs = p.runs;
     const pre = numbers?.get(p);
-    if (pre && runs.length) runs = [{ ...runs[0], text: pre + suffix }, ...runs];
+    if (pre && runs.length) {
+      const lv = (p.level ?? 1) - 1;
+      const label = `${lv === 0 ? nb.prefix1 ?? "" : ""}${pre}${nb.suffixes?.[lv] ?? nb.suffix}`;
+      runs = [{ ...runs[0], text: label, weight: nb.bold ? Math.max(700, runs[0].weight) : runs[0].weight }, ...runs];
+    }
     if (vars) runs = runs.map((r) => ({ ...r, text: applyVars(r.text, vars) }));
     return runs === p.runs ? p : { ...p, runs };
   });

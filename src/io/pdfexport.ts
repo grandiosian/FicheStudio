@@ -16,6 +16,7 @@ import { apply, shapeToSubpaths } from "../geom";
 import { layoutText } from "../textlayout";
 import { boundColor, computeNumbering, fileName, prepareText, varsFor } from "../templates";
 import { cutLines, masterLayerMatrix } from "../render";
+import { CUT } from "../charte";
 import { assetBytes } from "../assets";
 import { download } from "./export";
 
@@ -250,7 +251,7 @@ class Painter {
   }
 
   private async text(n: Extract<SceneNode, { type: "text" }>, opacity: number) {
-    const t = prepareText(n, this.numbers, this.doc.numbering.suffix, this.vars);
+    const t = prepareText(n, this.numbers, this.doc.numbering, this.vars);
     for (const l of layoutText(t)) {
       for (const s of l.spans) {
         const r = s.run;
@@ -311,7 +312,7 @@ class Painter {
   }
 
   cut(x1: number, y1: number, x2: number, y2: number, w: number) {
-    this.ops.push(pushGraphicsState(), setStrokingRgbColor(0.33, 0.33, 0.33), setLineWidth(w), setDashPattern([w * 6, w * 4], 0), moveTo(x1, y1), lineTo(x2, y2), stroke(), popGraphicsState());
+    this.ops.push(pushGraphicsState(), setStrokingRgbColor(47 / 255, 87 / 255, 161 / 255), setLineWidth(w), setLineCap(LineCapStyle.Round), setDashPattern(CUT.dash.map((d) => d * w), 0), moveTo(x1, y1), lineTo(x2, y2), stroke(), popGraphicsState());
   }
 }
 
@@ -376,7 +377,7 @@ async function buildPdf(doc: Doc, sheets: Sheet[], opts: PdfOptions, warn: Set<s
     }
     p.vars = varsFor(doc, sh.pageIndex, sh.section ?? 0, sh.row);
     for (const l of page.layers) await p.node(l);
-    if (opts.cutMarks && sh.section === null) for (const [x1, y1, x2, y2] of cutLines(page)) p.cut(x1, y1, x2, y2, page.width / 600);
+    if (opts.cutMarks && sh.section === null) for (const [x1, y1, x2, y2] of cutLines(page)) p.cut(x1, y1, x2, y2, CUT.width * page.width / 2480);
     p.ops.push(popGraphicsState());
     pdfPage.pushOperators(...p.ops);
   }

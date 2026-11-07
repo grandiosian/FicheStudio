@@ -4,6 +4,7 @@ import {
   defaultStroke, newGroup, newLayer, newParagraph, newShape, NONE, solid, uid, walk,
   type Asset, type Doc, type GroupNode, type Master, type Run, type SceneNode, type TextNode,
 } from "./model";
+import { charteBlocks, CUT, type CharteVariant } from "./charte";
 
 export interface LibItem {
   id: string;
@@ -95,11 +96,11 @@ function cutLine(): SceneNode[] {
   return [{
     id: uid(), name: "Ligne de découpe", visible: true, locked: false, opacity: 1, transform: [1, 0, 0, 1, 0, 0],
     type: "path", subpaths: [{ closed: false, points: [{ x: 0, y: 0 }, { x: 2480, y: 0 }] }],
-    fill: NONE, stroke: { paint: solid("#555555"), width: 4, dash: [6, 4], cap: "butt", join: "miter" },
+    fill: NONE, stroke: { paint: solid(CUT.color), width: CUT.width, dash: CUT.dash, cap: "round", join: "round" },
   }];
 }
 
-export function builtinItems(): LibItem[] {
+export function builtinItems(variant?: CharteVariant): LibItem[] {
   const mk = (name: string, nodes: SceneNode[], place: LibItem["place"], kind: LibItem["kind"] = "objects"): LibItem =>
     ({ id: `builtin:${name}`, name, kind, place, nodes, assets: {}, builtin: true });
   return [
@@ -112,6 +113,7 @@ export function builtinItems(): LibItem[] {
     mk("Lignes de réponse", answerLines(), { x: 140, y: 0, from: "center" }),
     mk("Encadré consigne", consigne(), { x: 140, y: 0, from: "center" }),
     mk("Ligne de découpe", cutLine(), { x: 0, y: 0, from: "center" }),
+    ...charteBlocks(variant).map((b) => mk(`Charte · ${b.name}`, b.nodes, { x: b.x, y: 0, from: "center" })),
   ];
 }
 

@@ -1,7 +1,10 @@
 import "./style.css";
 import { store, loadLocal, type Tool } from "./store";
-import { initCanvas, setTool, zoomBy, zoomToFit, view, cancelInteraction, deleteActiveAnchor, insertImageNode, isTyping, finishPen } from "./canvas";
-import { initPanels } from "./panels";
+import { initCanvas, setTool, zoomBy, zoomToFit, zoomToWidth, view, cancelInteraction, deleteActiveAnchor, insertImageNode, isTyping, finishPen } from "./canvas";
+import { loadCharteInit, prefsDialog } from "./prefs";
+import { hasCharteMasters, updateCharteMasters } from "./charte";
+import { showCharte, checkCharteDialog, variantDialog } from "./charteview";
+import { initPanels, refreshCompetencesPanel, tablePicker, templatePicker } from "./panels";
 import { closeTextEditor, isEditingText, openTextEditor } from "./textedit";
 import { copySelection, deleteSelection, duplicate, groupSelection, moveSelection, paste, ungroupSelection } from "./ops";
 import { newDoc, newImage, uid } from "./model";
@@ -33,9 +36,13 @@ const TOOLS: [Tool, string, string, string][] = [
 function buildToolbar() {
   const tb = $("#toolbar");
   tb.innerHTML = TOOLS.map(([t, k, label, d]) => `<button data-tool="${t}" title="${label} (${k})"><svg viewBox="0 0 24 24"><path d="${d}"/></svg></button>`).join("")
+    + `<button data-cmd="templates" title="Modèles et blocs de la charte (aperçus)"><svg viewBox="0 0 24 24"><path d="M4 3h16v5H4z M4 11h7v10H4z M14 11h6v4h-6z M14 18h6v3h-6z"/></svg></button>`
+    + `<button data-cmd="table" title="Insérer un tableau à la charte"><svg viewBox="0 0 24 24"><path d="M3 4h18v16H3z M3 9h18 M3 14.5h18 M9 4v16 M15 4v16"/></svg></button>`
     + `<button data-cmd="image" title="Insérer une image"><svg viewBox="0 0 24 24"><path d="M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6 M15 9a1.5 1.5 0 100-.01"/></svg></button>`;
   tb.querySelectorAll<HTMLElement>("[data-tool]").forEach((b) => (b.onclick = () => setTool(b.dataset.tool as Tool)));
   tb.querySelector<HTMLElement>('[data-cmd="image"]')!.onclick = (e) => imageMenu(e.currentTarget as HTMLElement);
+  tb.querySelector<HTMLElement>('[data-cmd="templates"]')!.onclick = (e) => templatePicker(e.currentTarget as HTMLElement);
+  tb.querySelector<HTMLElement>('[data-cmd="table"]')!.onclick = (e) => tablePicker(e.currentTarget as HTMLElement);
   const sync = () => tb.querySelectorAll<HTMLElement>("[data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === store.tool));
   store.on(sync);
   sync();
@@ -224,9 +231,36 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
   },
   present: () => { closeTextEditor(); store.editingMaster = null; startPresentation(); },
   l2p: () => { if (!store.editingMaster) layerPagesDialog((msg) => status(msg)); },
+  charte: () => showCharte(),
+  chartecheck: () => checkCharteDialog(),
+  chartevariant: () => variantDialog(),
+  charteprefs: () => prefsDialog((update) => {
+    if (update && hasCharteMasters(store.doc)) store.commit(() => { updateCharteMasters(store.doc); }, "doc");
+  }),
   undo: () => store.undo(),
   redo: () => store.redo(),
   fit: () => zoomToFit(),
+  zoommenu: () => {
+    document.querySelector(".pop-menu")?.remove();
+    const btn = $("#zoom");
+    const m = document.createElement("div");
+    m.className = "pop-menu menu-body";
+    // pourcentage affiché = taille réelle à l'écran (96 ppp CSS)
+    const real = (z: number) => (96 / store.doc.dpi) * z;
+    m.innerHTML = `<button data-z="fit">Ajuster à la fenêtre <kbd>⌘0</kbd></button><button data-z="width">Pleine largeur</button><hr>`
+      + [0.25, 0.5, 0.75, 1, 1.5, 2, 4].map((z) => `<button data-z="${z}">${Math.round(z * 100)} %</button>`).join("");
+    const r = btn.getBoundingClientRect();
+    m.style.left = `${r.left}px`; m.style.top = `${r.bottom + 4}px`;
+    document.body.appendChild(m);
+    m.onclick = (e) => {
+      const z = (e.target as HTMLElement).closest("button")?.dataset.z;
+      m.remove();
+      if (z === "fit") zoomToFit();
+      else if (z === "width") zoomToWidth();
+      else if (z) zoomBy(real(+z) / view.zoom);
+    };
+    setTimeout(() => document.addEventListener("click", function off(ev) { if (!m.contains(ev.target as Node)) { m.remove(); document.removeEventListener("click", off); } }), 0);
+  },
   zin: () => zoomBy(1.25),
   zout: () => zoomBy(0.8),
   z100: () => zoomBy((96 / store.doc.dpi) / view.zoom),
@@ -397,6 +431,7 @@ function initResizers() {
 async function start() {
   buildToolbar();
   buildTopbar();
+  await loadCharteInit(); // préférences de la charte avant de créer ou restaurer les documents
   const saved = await loadLocal();
   const docs = (saved?.docs ?? []).filter((d) => d?.format === "fichestudio" && d.pages?.length);
   if (docs.length) store.restoreTabs(docs, saved!.active);
@@ -425,6 +460,8 @@ async function start() {
     document.querySelectorAll<HTMLElement>("#left .tabs button").forEach((x) => x.classList.toggle("on", x === b));
     $("#layers").hidden = b.dataset.tab !== "layers";
     $("#library").hidden = b.dataset.tab !== "library";
+    $("#competences").hidden = b.dataset.tab !== "competences";
+    if (b.dataset.tab === "competences") refreshCompetencesPanel();
   }));
   // bandeau du mode gabarit
   store.on(() => {

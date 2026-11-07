@@ -49,7 +49,9 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
 - **Présentation** (▶ Présenter ou F5), pensée pour le vidéoprojecteur en écran dupliqué :
   plein écran, correction pas à pas (→ / Espace / télécommande : les calques « _Corr » et les
   objets cochés « Étape de correction » apparaissent un par un dans l'ordre de lecture),
-  clic sur un bloc ou rectangle tracé pour l'agrandir sur tout l'écran, molette pour zoomer,
+  clic sur un bloc ou rectangle tracé (aux proportions de l'écran) pour l'agrandir sur tout
+  l'écran, niveaux de zoom (feuille entière, pleine largeur, ×1,5 à ×4, − / +, molette),
+  main pour se déplacer dans la feuille agrandie (H ou bouton du milieu),
   stylo, surligneur, flèche, gomme, 6 couleurs, 3 épaisseurs, tableau blanc (blanc, carreaux,
   Seyès, noir). Les annotations restent le temps de la session et ne modifient pas le document.
 - **Onglets** : plusieurs documents ouverts à la fois, chacun avec son historique d'annulation ;
@@ -68,6 +70,57 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   d'après les feuilles, ZIP, série CSV, polices intégrées), impression du navigateur, SVG par
   page, format natif `.fiche.json`, et **script Affinity**.
 - Annuler/rétablir (200 niveaux), sauvegarde automatique locale (IndexedDB).
+- **Cadrer** : double-clic sur un calque ou un objet du panneau Calques = zoom animé sur son cadre
+  (⌥ double-clic pour renommer). **Clic droit** : zoom au plus près, sélectionner le contenu,
+  renommer, masquer, verrouiller, et pour un calque : appliquer / remplacer / retirer un modèle de la charte.
+- **Œil et cadenas** : zones cliquables de 24 px ; appuyer puis glisser sur d'autres lignes masque,
+  affiche ou verrouille plusieurs calques d'un coup (une seule annulation).
+- **Couleurs en direct** : la page suit le sélecteur de couleur pendant qu'on le fait glisser ;
+  un seul niveau d'annulation par réglage.
+
+### Charte graphique des ateliers
+
+La charte ([docs/charte_ateliers.md](docs/charte_ateliers.md)) est intégrée :
+
+- menu **Charte** : consulter la charte, vérifier le document (découpes, types de feuilles, pastilles) ;
+- **fichier init** `public/charte.init.json` (lu au démarrage) : variante par défaut, couleurs de la
+  charte, couleurs d'étiquette par type de feuille, couleurs des compétences par thème, pastilles de
+  niveau, rayons des bandeaux (1re feuille 8 mm, cadre du résumé 1 mm, ressource 1 mm), ligne de découpe. Charte ›
+  Préférences permet de le modifier, l'importer ou l'exporter ; les préférences personnelles sont
+  gardées dans le navigateur et peuvent mettre à jour les gabarits de la charte du document ;
+- **variantes de disposition** (Charte › Variantes) : Classique (1 · 1.1 · 1.1.1), Chapitres
+  (« Chapitre I », a), b)… 1.), Grille (A, puis A1, A2… B1, B2…), Mixte (1 · a · i). La variante règle la
+  numérotation et le style des titres ; les blocs « titre de niveau 1/2/3 » de la bibliothèque suivent la variante ;
+- **＋ Charte** (panneau Feuilles) : le modèle de la charte est **copié dans chaque calque de page**
+  (groupe verrouillé « Modèle charte · … », sous le contenu), choisi d'après le nom du calque
+  (P01 → feuille d'atelier, la 1re ayant le grand en-tête ; R01 → ressource ; S01 → synthèse ;
+  E01 → évaluation…). Chaque calque garde ainsi son propre en-tête, modifiable, sans gabarit partagé.
+  Les nouvelles feuilles d'un document à la charte reçoivent aussi leur modèle ;
+- types de feuille de la charte (fiche péda, prof, atelier, ressource, synthèse, évaluation,
+  ressource d'évaluation) avec leur couleur d'étiquette de calque (atelier bleu, ressources orange,
+  fiche péda et prof jaune, synthèse violet, évaluation rouge) ; ligne de découpe seulement
+  sur les feuilles d'atelier, en pointillés bleus de 12 px à tirets arrondis (éditeur, PDF, Affinity) ;
+- bibliothèque « Charte · … » : bande question, cadre « Recopie et réponds », case à compléter,
+  case à cocher, lignes de réponse, filet fin, étiquettes ORDI / PAPIER, « À retenir », banque de
+  mots, objectif, cadre de ressource, blocs ressources (liseré bleu avec cartouche arrondi du nom :
+  pleine largeur, demi-largeur, avec image, avec tableau), bloc définition, barème,
+  « → Tourne la page », réponse corrigée ;
+- **Modèles** (icône de la barre d'outils) : fenêtre d'aperçus de la charte, avec filtre. Les 5 modèles
+  de page se copient dans le calque actif (celui conseillé pour son nom est entouré) ; les titres de
+  la variante et tous les blocs s'insèrent d'un clic ;
+- **Tableau** (icône de la barre d'outils : grille à survoler pour choisir rangées × colonnes ; ou panneau Propriétés) : rangées, colonnes, rangée et colonne de titre, largeur, hauteur
+  des cases. Le tableau est un dossier de calques : une rangée par groupe, chaque case = rectangle +
+  texte ; en-têtes bleu clair, contours bleus ;
+- nuancier de la charte sous chaque couleur, et **styles de texte de la charte** (corps, puces,
+  titres, étiquettes…, interligne 1,12 et espace après 0,35 × corps).
+
+### Compétences (programme de technologie, cycle 4)
+
+Onglet **Compétences** (extrait de `Prog_Acad_Techno_College_5-4-3.xlsx` par
+`tools/referentiel.py` → `src/data/referentiel.json`) : thèmes OST / SFC / CCRI, codes T1C11…T3C31,
+attendus par niveau (5e, 4e, 3e) et connaissances, recherche, filtre de niveau. ◉ insère la pastille
+de compétence dans la marge, colorée selon le thème (T1 vert, T2 rose, T3 jaune orangé), ≡ insère les attendus en liste à puces ; ✓ marque les
+compétences déjà présentes dans le document.
 
 ### Polices dans les PDF
 

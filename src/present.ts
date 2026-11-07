@@ -5,7 +5,8 @@ import { store } from "./store";
 import { renderPage } from "./render";
 import type { GroupNode, Page, SceneNode } from "./model";
 
-type Tool = "pointer" | "pen" | "marker" | "arrow" | "eraser";
+type Tool = "pointer" | "hand" | "pen" | "marker" | "arrow" | "eraser";
+const LEVELS = [1, 1.5, 2, 3, 4]; // × la feuille entière
 type BoardBg = "blanc" | "carreaux" | "seyes" | "noir";
 interface Rect { x: number; y: number; w: number; h: number }
 interface Stroke { tool: "pen" | "marker" | "arrow"; color: string; width: number; pts: number[] }
@@ -170,8 +171,10 @@ class Presenter {
     return { s, x: (w - r.w * s) / 2 - r.x * s, y: (h - r.h * s) / 2 - r.y * s };
   }
 
+  targetS: number | null = null; // échelle visée pendant une animation (pour l'affichage du %)
   setView(v: { s: number; x: number; y: number }, animate = true) {
     cancelAnimationFrame(this.anim);
+    this.targetS = v.s;
     const from = { ...this.view };
     const t0 = performance.now(), dur = animate ? 380 : 0;
     const step = (t: number) => {
@@ -185,9 +188,32 @@ class Presenter {
     if (!animate) step(t0);
   }
 
-  zoomTo(r: Rect | null) {
+  zoomTo(r: Rect | null, margin = 0.06) {
     this.focus = r;
-    this.setView(this.fitRect(r ?? this.sheetRect(), r ? 0.06 : 0.03));
+    this.setView(this.fitRect(r ?? this.sheetRect(), r ? margin : 0.03));
+    this.renderBar();
+  }
+
+  /** Niveau de zoom relatif à la feuille entière (1 = feuille entière), autour du centre de l'écran. */
+  get level() { return (this.targetS ?? this.view.s) / this.fitRect(this.sheetRect()).s; }
+  setLevel(z: number) {
+    const fit = this.fitRect(this.sheetRect());
+    if (z <= 1.001) { this.zoomTo(null); return; }
+    const s = fit.s * z, cx = this.size.w / 2, cy = this.size.h / 2;
+    this.focus = { x: 0, y: 0, w: 0, h: 0 };
+    this.setView({ s, x: cx - ((cx - this.view.x) * s) / this.view.s, y: cy - ((cy - this.view.y) * s) / this.view.s });
+    this.renderBar();
+  }
+  zoomStep(dir: 1 | -1) {
+    const z = this.level;
+    const next = dir > 0 ? LEVELS.find((l) => l > z + 0.01) ?? z * 1.5 : [...LEVELS].reverse().find((l) => l < z - 0.01) ?? 1;
+    this.setLevel(Math.min(12, next));
+  }
+  fitWidth() {
+    const r = this.sheetRect();
+    const s = this.size.w / (r.w * 1.02);
+    this.focus = { x: 0, y: 0, w: 0, h: 0 };
+    this.setView({ s, x: (this.size.w - r.w * s) / 2, y: 10 - r.y * s });
     this.renderBar();
   }
 
@@ -198,7 +224,8 @@ class Presenter {
     const s = Math.max(0.05, Math.min(40, this.view.s * Math.exp(-e.deltaY * 0.0025)));
     this.focus = { x: 0, y: 0, w: 0, h: 0 }; // vue libre : Échap ou clic revient à la feuille entière
     this.setView({ s, x: px - ((px - this.view.x) * s) / this.view.s, y: py - ((py - this.view.y) * s) / this.view.s }, false);
-    this.renderBar();
+    const o = this.bar.querySelector<HTMLOptionElement>(".zsel option");
+    if (o) o.textContent = `${Math.round(this.level * 100)} %`; else this.renderBar();
   };
 
   onResize = () => {
@@ -267,7 +294,16 @@ class Presenter {
     return [(e.clientX - r.left - this.view.x) / this.view.s, (e.clientY - r.top - this.view.y) / this.view.s];
   }
 
+  pan: { x: number; y: number; vx: number; vy: number } | null = null;
   onDown = (e: PointerEvent) => {
+    // main : outil dédié ou bouton du milieu ; on se déplace même très zoomé
+    if (e.button === 1 || (e.button === 0 && this.tool === "hand")) {
+      e.preventDefault();
+      this.svg.setPointerCapture(e.pointerId);
+      this.pan = { x: e.clientX, y: e.clientY, vx: this.view.x, vy: this.view.y };
+      this.svg.classList.add("panning");
+      return;
+    }
     if (e.button !== 0) return;
     if (this.tool === "pointer") {
       // glisser = rectangle de zoom ; clic = bloc sous le pointeur (ou retour à la feuille si déjà agrandi)
@@ -283,7 +319,7 @@ class Presenter {
     this.svg.setPointerCapture(e.pointerId);
     const [x, y] = this.toSheet(e);
     const w = (this.tool === "marker" ? this.width * 3.5 : this.width) / this.view.s;
-    const stroke: Stroke = { tool: this.tool, color: this.color, width: w, pts: [x, y] };
+    const stroke: Stroke = { tool: this.tool as Stroke["tool"], color: this.color, width: w, pts: [x, y] };
     const el = document.createElementNS(NS, "path");
     this.inkG.appendChild(el);
     this.drawing = { stroke, el };
@@ -293,9 +329,22 @@ class Presenter {
   marquee: { x0: number; y0: number; x1: number; y1: number; el: SVGRectElement; target: Element } | null = null;
   erasing = false;
   onMove = (e: PointerEvent) => {
+    if (this.pan) {
+      cancelAnimationFrame(this.anim);
+      this.view = { s: this.view.s, x: this.pan.vx + e.clientX - this.pan.x, y: this.pan.vy + e.clientY - this.pan.y };
+      this.world.setAttribute("transform", `matrix(${this.view.s} 0 0 ${this.view.s} ${this.view.x} ${this.view.y})`);
+      if (!this.focus) { this.focus = { x: 0, y: 0, w: 0, h: 0 }; this.renderBar(); }
+      return;
+    }
     if (this.marquee) {
       const m = this.marquee;
-      [m.x1, m.y1] = this.toSheet(e);
+      // rectangle aux proportions de l'écran (vidéoprojecteur) : la zone le remplira exactement
+      const [x, y] = this.toSheet(e);
+      const A = this.size.w / this.size.h;
+      let w = Math.abs(x - m.x0), h = Math.abs(y - m.y0);
+      if (w / Math.max(h, 1e-6) > A) h = w / A; else w = h * A;
+      m.x1 = m.x0 + Math.sign(x - m.x0 || 1) * w;
+      m.y1 = m.y0 + Math.sign(y - m.y0 || 1) * h;
       Object.entries({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), width: Math.abs(m.x1 - m.x0), height: Math.abs(m.y1 - m.y0), "stroke-width": 2 / this.view.s })
         .forEach(([k, v]) => m.el.setAttribute(k, String(v)));
       return;
@@ -315,12 +364,13 @@ class Presenter {
 
   onUp = () => {
     this.erasing = false;
+    if (this.pan) { this.pan = null; this.svg.classList.remove("panning"); return; }
     if (this.marquee) {
       const m = this.marquee;
       this.marquee = null;
       m.el.remove();
       const w = Math.abs(m.x1 - m.x0), h = Math.abs(m.y1 - m.y0);
-      if (w * this.view.s > 12 && h * this.view.s > 12) { this.zoomTo({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), w, h }); return; }
+      if (w * this.view.s > 12 && h * this.view.s > 12) { this.zoomTo({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), w, h }, 0); return; }
       if (this.focus) { this.zoomTo(null); return; }
       const target = this.blockAt(m.target);
       const box = (target && this.boxOf(target)) || this.blockBoxAt(m.x0, m.y0);
@@ -441,7 +491,8 @@ class Presenter {
       arrowleft: () => this.prev(), pageup: () => this.prev(), arrowup: () => this.prev(), backspace: () => this.prev(),
       escape: () => (this.focus ? this.zoomTo(null) : this.close()),
       home: () => this.zoomTo(null), "0": () => this.zoomTo(null),
-      v: () => this.setTool("pointer"), p: () => this.setTool("pen"), s: () => this.setTool("pen"), m: () => this.setTool("marker"),
+      v: () => this.setTool("pointer"), h: () => this.setTool("hand"), "+": () => this.zoomStep(1), "=": () => this.zoomStep(1), "-": () => this.zoomStep(-1), w: () => this.fitWidth(),
+      p: () => this.setTool("pen"), s: () => this.setTool("pen"), m: () => this.setTool("marker"),
       a: () => this.setTool("arrow"), g: () => this.setTool("eraser"), e: () => this.setTool("eraser"),
       z: () => { this.autoZoom = !this.autoZoom; this.renderBar(); },
       b: () => this.toggleBoard(), delete: () => this.clearInk(),
@@ -466,12 +517,16 @@ class Presenter {
   renderBar() {
     const doc = store.doc;
     const name = this.board !== null ? `Tableau ${this.board + 1} / ${boards.length}` : `${this.pageIndex + 1} / ${doc.pages.length} · ${this.page?.name ?? ""}`;
-    const tools: [Tool, string, string][] = [["pointer", "🖱", "Pointeur : clic sur un bloc = plein écran (V)"], ["pen", "✏️", "Stylo (P)"], ["marker", "🖍", "Surligneur (M)"], ["arrow", "➚", "Flèche (A)"], ["eraser", "⌫", "Gomme (G)"]];
+    const tools: [Tool, string, string][] = [["pointer", "🖱", "Pointeur : clic sur un bloc ou rectangle tracé = plein écran (V)"], ["hand", "✋", "Main : se déplacer dans la feuille agrandie (H, ou bouton du milieu)"], ["pen", "✏️", "Stylo (P)"], ["marker", "🖍", "Surligneur (M)"], ["arrow", "➚", "Flèche (A)"], ["eraser", "⌫", "Gomme (G)"]];
     this.bar.innerHTML = `
       <button data-a="prevSheet" title="Feuille précédente">⏮</button><span class="pname">${name.replace(/</g, "&lt;")}</span><button data-a="nextSheet" title="Feuille suivante">⏭</button>
       <span class="sep"></span>
       <button data-a="prev" title="Étape précédente (←)">◀</button><span class="steps" title="Étapes de correction révélées">${this.steps.length ? `Correction ${this.shown} / ${this.steps.length}` : "Pas d'étape"}</span><button data-a="next" title="Étape suivante (→ ou Espace)">▶</button>
       <button data-a="auto" class="${this.autoZoom ? "on" : ""}" title="Agrandir automatiquement chaque correction révélée (Z)">🔍</button>
+      <span class="sep"></span>
+      <button data-a="zout" title="Zoom arrière (−)">−</button>
+      <select class="zsel" title="Niveau de zoom"><option value="">${Math.round(this.level * 100)} %</option><option value="fit">Feuille entière</option><option value="width">Pleine largeur (W)</option>${LEVELS.slice(1).map((l) => `<option value="${l}">× ${String(l).replace(".", ",")}</option>`).join("")}</select>
+      <button data-a="zin" title="Zoom avant (+)">+</button>
       ${this.focus ? `<button data-a="unzoom" title="Revoir toute la feuille (Échap)">⤢</button>` : ""}
       <span class="sep"></span>
       ${tools.map(([t, ic, tt]) => `<button data-t="${t}" class="${this.tool === t ? "on" : ""}" title="${tt}">${ic}</button>`).join("")}
@@ -493,11 +548,19 @@ class Presenter {
       else ({
         prevSheet: () => this.gotoSheet(-1), nextSheet: () => this.gotoSheet(1), prev: () => this.prev(), next: () => this.next(),
         auto: () => { this.autoZoom = !this.autoZoom; this.renderBar(); }, unzoom: () => this.zoomTo(null),
+        zin: () => this.zoomStep(1), zout: () => this.zoomStep(-1),
         clear: () => this.clearInk(), board: () => this.toggleBoard(), newBoard: () => this.newBoard(),
         fs: () => (document.fullscreenElement ? document.exitFullscreen() : this.root.requestFullscreen()).catch(() => {}),
         quit: () => this.close(),
       } as Record<string, () => void>)[a ?? ""]?.();
     }));
+    const sel = this.bar.querySelector<HTMLSelectElement>(".zsel")!;
+    sel.onchange = () => {
+      const v = sel.value;
+      if (v === "fit") this.zoomTo(null); else if (v === "width") this.fitWidth(); else if (v) this.setLevel(+v);
+      this.svg.focus?.();
+    };
+    sel.onkeydown = (ev) => ev.stopPropagation();
     this.svg.dataset.tool = this.tool;
   }
 }

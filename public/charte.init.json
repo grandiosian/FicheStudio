@@ -1,0 +1,34 @@
+{
+  "_aide": "Préférences de la charte des ateliers, lues au démarrage de FicheStudio. Couleurs en #rrggbb, rayons en mm, épaisseur de découpe en px (feuille A4 à 300 ppp).",
+  "variante": "classique",
+  "couleurs": {
+    "bleu": "#2f57a1",
+    "marine": "#010958",
+    "clair": "#c9d4f4",
+    "pale": "#e5e8f2",
+    "gris": "#e9ecf3",
+    "recopie": "#f3f5fb",
+    "corr": "#009646",
+    "ordi": "#02c731",
+    "ordiTexte": "#152d00",
+    "objectif": "#fff0c8",
+    "retenir": "#fff9e1",
+    "retenirTrait": "#f0aa1e",
+    "mots": "#e8f4ff",
+    "filet": "#afb9d7",
+    "alerte": "#d62d2d"
+  },
+  "etiquettes": {
+    "peda": "#ffdc00",
+    "prof": "#ffdc00",
+    "fiche": "#118eff",
+    "ressource": "#ff8c00",
+    "synthese": "#cb64ff",
+    "eval": "#ff4f44",
+    "evalres": "#ff8c00"
+  },
+  "competences": { "T1": "#28aa46", "T2": "#e65096", "T3": "#f5a51e" },
+  "niveaux": { "6": "#e94e77", "5": "#30c700", "4": "#fcca30", "3": "#d82834" },
+  "bandeaux": { "enteteRayonMm": 8, "resumeRayonMm": 1, "ressourceRayonMm": 1 },
+  "decoupe": { "couleur": "#2f57a1", "epaisseur": 12 }
+}

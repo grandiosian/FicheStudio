@@ -2,7 +2,7 @@
 // page A4 (P01… pages, R01… ressources, FichePeda, PROF…). On en fait des feuilles séparées
 // en ne gardant que celles qui intéressent.
 import { store, assetTrash } from "./store";
-import { newDoc, uid, walk, type Doc, type GroupNode, type Page, type SceneNode, type SheetKind } from "./model";
+import { newDoc, uid, walk, SHEET_KINDS, type Doc, type GroupNode, type Page, type SceneNode, type SheetKind } from "./model";
 import { cloneNode } from "./ops";
 
 export interface LayerPagesOptions {
@@ -14,17 +14,20 @@ export interface LayerPagesOptions {
 }
 
 /** Catégorie d'un calque d'après son nom (convention des ateliers). */
-export type LayerKind = "page" | "ressource" | "eval" | "evalres" | "autre";
+export type LayerKind = "peda" | "prof" | "page" | "ressource" | "synthese" | "eval" | "evalres" | "autre";
 export function layerKind(name: string): LayerKind {
   const n = name.toUpperCase();
   const tok = (re: string) => new RegExp(`(^|[_\\s-])${re}([_\\s-]|$)`).test(n);
+  if (/FICHE\s*_?PEDA|FICHEPEDA/.test(n)) return "peda";
+  if (tok("PROF")) return "prof";
+  if (tok("S\\d{1,3}") || /SYNTH/.test(n)) return "synthese";
   if (tok("ER\\d{1,3}") || /EVAL\w*[_\s-]*(R\d|RES)/.test(n)) return "evalres";
   if (tok("E\\d{1,3}") || /EVAL/.test(n)) return "eval";
   if (tok("P\\d{1,3}")) return "page";
   if (tok("R\\d{1,3}") || /RESSOURCE/.test(n)) return "ressource";
   return "autre";
 }
-const SHEET_OF: Record<LayerKind, SheetKind> = { page: "fiche", ressource: "ressource", eval: "eval", evalres: "evalres", autre: "fiche" };
+const SHEET_OF: Record<LayerKind, SheetKind> = { peda: "peda", prof: "prof", page: "fiche", ressource: "ressource", synthese: "synthese", eval: "eval", evalres: "evalres", autre: "fiche" };
 
 const isCorrection = (n: SceneNode) => n.type === "group" && /(_|\s|^)corr(ig[ée])?(_|\s|$)/i.test(n.name);
 
@@ -51,6 +54,7 @@ function buildPages(src: Page, layers: GroupNode[], opts: LayerPagesOptions): Pa
   return layers.map((l, i) => {
     const layer = cloneNode(l);
     layer.visible = true;
+    layer.tag ??= SHEET_KINDS[SHEET_OF[layerKind(l.name)]].tag;
     layer.isLayer = true;
     const prune = (g: GroupNode) => {
       g.children = g.children.filter((c) => !(opts.corrections === "remove" && isCorrection(c)));
@@ -65,6 +69,8 @@ function buildPages(src: Page, layers: GroupNode[], opts: LayerPagesOptions): Pa
       id: uid("p"),
       name: names[i],
       kind: SHEET_OF[layerKind(l.name)],
+      // charte : pas de ligne de découpe hors des feuilles d'atelier
+      sections: SHEET_OF[layerKind(l.name)] === "fiche" ? src.sections : 1,
       layers: [layer],
       fields: { ...(src.fields ?? {}) },
     };
@@ -111,7 +117,7 @@ export function layerPagesDialog(done: (msg: string) => void) {
   const page = store.page;
   const layers = [...page.layers];
   const kinds = layers.map((l) => layerKind(l.name));
-  const label: Record<LayerKind, string> = { page: "Page", ressource: "Ressource", eval: "Évaluation", evalres: "Ress. éval.", autre: "Autre" };
+  const label: Record<LayerKind, string> = { peda: "Fiche péda", prof: "Prof", page: "Page", ressource: "Ressource", synthese: "Synthèse", eval: "Évaluation", evalres: "Ress. éval.", autre: "Autre" };
   const box = document.createElement("div");
   box.className = "modal";
   box.innerHTML = `<form class="modal-card wide">
@@ -120,6 +126,7 @@ export function layerPagesDialog(done: (msg: string) => void) {
     <div class="btnrow wrap">
       <button type="button" data-q="page">Pages (P…)</button><button type="button" data-q="ressource">Ressources (R…)</button>
       <button type="button" data-q="eval">Évaluations (E…, EVAL)</button><button type="button" data-q="evalres">Ress. d'éval. (ER…)</button>
+      <button type="button" data-q="synthese">Synthèse (S…)</button><button type="button" data-q="peda">Fiche péda</button><button type="button" data-q="prof">Prof</button>
       <button type="button" data-q="visible">Calques visibles</button><button type="button" data-q="all">Tout</button><button type="button" data-q="none">Aucun</button></div>
     <ul class="layer-pick">${layers.map((l, i) => {
       let objs = 0; walk(l.children, () => { objs++; });

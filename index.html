@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FicheStudio</title>
+  <meta name="description" content="Mise en page de fiches et dessin vectoriel dans le navigateur, compatible Affinity." />
+</head>
+<body>
+  <header id="topbar">
+    <span class="brand">Fiche<b>Studio</b></span>
+    <details class="menu"><summary>Fichier</summary>
+      <div class="menu-body">
+        <button data-act="new">Nouveau</button>
+        <button data-act="open">Ouvrir… <kbd>⌘O</kbd><small>.af, .afdesign, .fiche.json</small></button>
+        <button data-act="save">Enregistrer <kbd>⌘S</kbd><small>format .fiche.json</small></button>
+        <hr />
+        <button data-act="pdf">Exporter en PDF… <kbd>⌘P</kbd><small>un fichier, un par feuille ou par partie ; polices intégrées</small></button>
+        <button data-act="print">Imprimer…<small>impression directe du navigateur</small></button>
+        <button data-act="svg">Exporter la page en SVG</button>
+        <button data-act="affinity">Exporter pour Affinity<small>script qui recrée un .af natif</small></button>
+        <hr />
+        <div class="menu-title">Exemples</div>
+        <div id="samples-list"></div>
+      </div>
+    </details>
+    <button class="ico" data-act="undo" title="Annuler (⌘Z)">↶</button>
+    <button class="ico" data-act="redo" title="Rétablir (⌘⇧Z)">↷</button>
+    <div id="tabs"></div>
+    <span class="spacer"></span>
+    <button class="ico" data-act="zout" title="Zoom arrière">−</button>
+    <button id="zoom" data-act="fit" title="Ajuster à la fenêtre (⌘0)">100 %</button>
+    <button class="ico" data-act="zin" title="Zoom avant">+</button>
+  </header>
+  <nav id="toolbar"></nav>
+  <aside id="left"><section id="pages" class="panel"></section>
+    <div class="tabs"><button data-tab="layers" class="on">Calques</button><button data-tab="library">Bibliothèque</button></div>
+    <section id="layers" class="panel grow"></section><section id="library" class="panel grow" hidden></section></aside>
+  <main id="stage"><div id="master-banner" hidden></div></main>
+  <aside id="right"><section id="props" class="panel grow"></section><section id="data" class="panel"></section></aside>
+  <footer id="status"></footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "fichestudio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mise en page de fiches et dessin vectoriel dans le navigateur, compatible Affinity",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "fflate": "^0.8.2",
+    "fzstd": "^0.1.1",
+    "pdf-lib": "^1.17.1"
+  }
+}

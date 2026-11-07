@@ -1,5 +1,7 @@
 # FicheStudio
 
+> Création et gestion des ateliers de cours, compatible Affinity.
+
 Mise en page de fiches et dessin vectoriel **dans le navigateur**, qui ouvre les fichiers
 Affinity et sait les lui rendre en `.af` natif.
 

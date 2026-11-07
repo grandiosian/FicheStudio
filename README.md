@@ -46,6 +46,12 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   fiche est un calque (P01…, R01…), crée une feuille par calque choisi (sélection rapide Pages /
   Ressources), garde ou retire les corrigés `_Corr`, retire les images devenues inutiles,
   dans le document ou dans un nouvel onglet. Annulable.
+- **Présentation** (▶ Présenter ou F5), pensée pour le vidéoprojecteur en écran dupliqué :
+  plein écran, correction pas à pas (→ / Espace / télécommande : les calques « _Corr » et les
+  objets cochés « Étape de correction » apparaissent un par un dans l'ordre de lecture),
+  clic sur un bloc ou rectangle tracé pour l'agrandir sur tout l'écran, molette pour zoomer,
+  stylo, surligneur, flèche, gomme, 6 couleurs, 3 épaisseurs, tableau blanc (blanc, carreaux,
+  Seyès, noir). Les annotations restent le temps de la session et ne modifient pas le document.
 - **Onglets** : plusieurs documents ouverts à la fois, chacun avec son historique d'annulation ;
   ● = modifié depuis le dernier enregistrement. Tous les onglets sont restaurés au redémarrage.
 - **Exemples** : Fichier › Exemples ouvre les fichiers du dossier `samples/` (avec `npm run dev`

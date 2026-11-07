@@ -13,6 +13,7 @@ import type { PdfOptions } from "./io/pdfexport";
 const pdfModule = () => import("./io/pdfexport");
 import { canLinkFiles, linkLocalImage, linkUrlImage, resolveLinks } from "./assets";
 import { layerPagesDialog } from "./layerpages";
+import { startPresentation, isPresenting } from "./present";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -221,6 +222,7 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
     download(`${store.doc.name.replace(/[\\/:*?"<>|]+/g, "_")}.affinity.js`, js, "text/javascript");
     status("Script Affinity téléchargé : exécutez-le dans Affinity pour obtenir un .af natif.");
   },
+  present: () => { closeTextEditor(); store.editingMaster = null; startPresentation(); },
   l2p: () => { if (!store.editingMaster) layerPagesDialog((msg) => status(msg)); },
   undo: () => store.undo(),
   redo: () => store.redo(),
@@ -296,6 +298,8 @@ function status(msg: string, error = false, action?: { label: string; run: () =>
 // ------------------------------------------------------------------ clavier
 
 function onKey(e: KeyboardEvent) {
+  if (isPresenting()) return;
+  if (e.key === "F5" || ((e.metaKey || e.ctrlKey) && e.key === "Enter")) { e.preventDefault(); ACTIONS.present(); return; }
   if (isEditingText() || isTyping()) return;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key.toLowerCase();
@@ -340,6 +344,54 @@ function onKey(e: KeyboardEvent) {
   if (t) setTool(t[0]);
 }
 
+// ------------------------------------------------------------------ panneaux redimensionnables
+
+function initResizers() {
+  const LIMITS = { left: [170, 520, 230], right: [240, 600, 300] } as const;
+  const set = (side: "left" | "right", w: number) => {
+    const [min, max] = LIMITS[side];
+    w = Math.round(Math.max(min, Math.min(max, w)));
+    document.body.style.setProperty(`--${side}-w`, `${w}px`);
+    try { localStorage.setItem(`fs-${side}-w`, String(w)); } catch { /* stockage indisponible */ }
+    place();
+  };
+  // poignées hors des panneaux (dont le contenu déborde masqué), posées sur leur bordure
+  const handles: [HTMLElement, HTMLElement, "left" | "right"][] = [];
+  const place = () => {
+    for (const [h, panel, side] of handles) {
+      const r = panel.getBoundingClientRect();
+      Object.assign(h.style, { top: `${r.top}px`, height: `${r.height}px`, left: `${(side === "left" ? r.right : r.left) - 4}px` });
+    }
+  };
+  window.addEventListener("resize", place);
+  for (const side of ["left", "right"] as const) {
+    try { const v = localStorage.getItem(`fs-${side}-w`); if (v) set(side, +v); } catch { /* idem */ }
+    const panel = $(`#${side}`);
+    const h = document.createElement("div");
+    h.className = "resizer";
+    h.title = "Glisser pour élargir · double-clic : largeur par défaut";
+    document.body.appendChild(h);
+    handles.push([h, panel, side]);
+    h.onpointerdown = (e) => {
+      e.preventDefault();
+      h.setPointerCapture(e.pointerId);
+      h.classList.add("drag");
+      document.body.classList.add("resizing");
+      const x0 = e.clientX, w0 = panel.getBoundingClientRect().width;
+      h.onpointermove = (ev) => set(side, side === "left" ? w0 + ev.clientX - x0 : w0 - (ev.clientX - x0));
+      h.onpointerup = () => {
+        h.onpointermove = null;
+        h.classList.remove("drag");
+        document.body.classList.remove("resizing");
+        window.dispatchEvent(new Event("resize"));
+        zoomToFit(); // la page reste entièrement visible
+      };
+    };
+    h.ondblclick = () => { set(side, LIMITS[side][2]); window.dispatchEvent(new Event("resize")); zoomToFit(); };
+  }
+  requestAnimationFrame(place);
+}
+
 // ------------------------------------------------------------------ démarrage
 
 async function start() {
@@ -365,6 +417,7 @@ async function start() {
     }
   });
   window.addEventListener("beforeunload", () => closeTextEditor());
+  initResizers();
   document.addEventListener("pdf-dialog", (e) => pdfDialog(!!(e as CustomEvent).detail?.series));
   document.addEventListener("status", (e) => status(String((e as CustomEvent).detail)));
   // onglets Calques / Bibliothèque

@@ -2,7 +2,7 @@
 // page A4 (P01… pages, R01… ressources, FichePeda, PROF…). On en fait des feuilles séparées
 // en ne gardant que celles qui intéressent.
 import { store, assetTrash } from "./store";
-import { newDoc, uid, walk, type Doc, type GroupNode, type Page, type SceneNode } from "./model";
+import { newDoc, uid, walk, type Doc, type GroupNode, type Page, type SceneNode, type SheetKind } from "./model";
 import { cloneNode } from "./ops";
 
 export interface LayerPagesOptions {
@@ -14,12 +14,17 @@ export interface LayerPagesOptions {
 }
 
 /** Catégorie d'un calque d'après son nom (convention des ateliers). */
-export function layerKind(name: string): "page" | "ressource" | "autre" {
+export type LayerKind = "page" | "ressource" | "eval" | "evalres" | "autre";
+export function layerKind(name: string): LayerKind {
   const n = name.toUpperCase();
-  if (/(^|[_\s-])P\d{1,3}([_\s-]|$)/.test(n) || /(^|[_\s-])E\d{1,3}([_\s-]|$)/.test(n)) return "page";
-  if (/(^|[_\s-])R\d{1,3}([_\s-]|$)/.test(n) || /RESSOURCE/.test(n)) return "ressource";
+  const tok = (re: string) => new RegExp(`(^|[_\\s-])${re}([_\\s-]|$)`).test(n);
+  if (tok("ER\\d{1,3}") || /EVAL\w*[_\s-]*(R\d|RES)/.test(n)) return "evalres";
+  if (tok("E\\d{1,3}") || /EVAL/.test(n)) return "eval";
+  if (tok("P\\d{1,3}")) return "page";
+  if (tok("R\\d{1,3}") || /RESSOURCE/.test(n)) return "ressource";
   return "autre";
 }
+const SHEET_OF: Record<LayerKind, SheetKind> = { page: "fiche", ressource: "ressource", eval: "eval", evalres: "evalres", autre: "fiche" };
 
 const isCorrection = (n: SceneNode) => n.type === "group" && /(_|\s|^)corr(ig[ée])?(_|\s|$)/i.test(n.name);
 
@@ -59,6 +64,7 @@ function buildPages(src: Page, layers: GroupNode[], opts: LayerPagesOptions): Pa
       ...structuredClone({ ...src, layers: [] }),
       id: uid("p"),
       name: names[i],
+      kind: SHEET_OF[layerKind(l.name)],
       layers: [layer],
       fields: { ...(src.fields ?? {}) },
     };
@@ -105,14 +111,15 @@ export function layerPagesDialog(done: (msg: string) => void) {
   const page = store.page;
   const layers = [...page.layers];
   const kinds = layers.map((l) => layerKind(l.name));
-  const label = { page: "Page", ressource: "Ressource", autre: "Autre" };
+  const label: Record<LayerKind, string> = { page: "Page", ressource: "Ressource", eval: "Évaluation", evalres: "Ress. éval.", autre: "Autre" };
   const box = document.createElement("div");
   box.className = "modal";
   box.innerHTML = `<form class="modal-card wide">
     <h3>Calques → feuilles</h3>
     <p class="hint">Chaque calque coché devient une feuille, nommée d'après le calque. Les calques sont pris dans l'ordre du document.</p>
     <div class="btnrow wrap">
-      <button type="button" data-q="page">Pages (P…, E…)</button><button type="button" data-q="ressource">Ressources (R…)</button>
+      <button type="button" data-q="page">Pages (P…)</button><button type="button" data-q="ressource">Ressources (R…)</button>
+      <button type="button" data-q="eval">Évaluations (E…, EVAL)</button><button type="button" data-q="evalres">Ress. d'éval. (ER…)</button>
       <button type="button" data-q="visible">Calques visibles</button><button type="button" data-q="all">Tout</button><button type="button" data-q="none">Aucun</button></div>
     <ul class="layer-pick">${layers.map((l, i) => {
       let objs = 0; walk(l.children, () => { objs++; });

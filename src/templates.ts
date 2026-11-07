@@ -1,6 +1,6 @@
 // Variables {{nom}}, numérotation des titres (nomenclatures d'atelier), données CSV.
 import type { Doc, GroupNode, Mat, Numbering, Page, Paragraph, SceneNode, TextNode } from "./model";
-import { plainText, sectionRects, walk } from "./model";
+import { plainText, sectionRects, walk, SHEET_KINDS } from "./model";
 
 const VAR = /\{\{\s*([^{}]+?)\s*\}\}/g;
 
@@ -26,6 +26,9 @@ export function varsFor(doc: Doc, pageIndex: number, section = 0, row: Record<st
   };
   if ((page?.sections ?? 1) > 1 && section >= 0) v.feuille = `${pad2(pageIndex + 1)}${String.fromCharCode(97 + section)}`; // 01a, 01b…
   v.couleur_niveau = doc.levelColors[v.niveau] ?? "#fcca30";
+  const kind = page?.kind ?? "fiche";
+  v.type_feuille = SHEET_KINDS[kind].label;
+  v.entete ??= SHEET_KINDS[kind].entete;
   if (row) Object.assign(v, row);
   return v;
 }

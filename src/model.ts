@@ -28,6 +28,7 @@ interface Base {
   opacity: number;
   transform: Mat;
   tag?: string | null;   // couleur d'étiquette (calques, groupes)
+  step?: boolean;        // étape de correction : révélée pas à pas en présentation
 }
 
 export interface Vec { x: number; y: number }
@@ -121,6 +122,24 @@ export interface Page {
    *  « each » : répété dans chaque partie. */
   masterMode?: "sheet" | "each";
   fields?: Record<string, string>; // variables propres à la feuille (titre, séance…)
+  kind?: SheetKind;
+}
+
+/** Types de feuille d'un atelier : numérotation et en-tête propres. */
+export type SheetKind = "fiche" | "ressource" | "eval" | "evalres";
+export const SHEET_KINDS: Record<SheetKind, { label: string; prefix: string; entete: string }> = {
+  fiche: { label: "Fiche d'activité", prefix: "P", entete: "ATELIER" },
+  ressource: { label: "Ressource", prefix: "R", entete: "RESSOURCE" },
+  eval: { label: "Évaluation", prefix: "E", entete: "ÉVALUATION" },
+  evalres: { label: "Ressource d'évaluation", prefix: "ER", entete: "RESSOURCE D'ÉVALUATION" },
+};
+
+/** Prochain nom libre pour un type de feuille : P01, R02, E01, ER01… */
+export function nextSheetName(pages: Page[], kind: SheetKind): string {
+  const pre = SHEET_KINDS[kind].prefix;
+  const re = new RegExp(`(^|[_\\s-])${pre}(\\d+)$`, "i");
+  const n = Math.max(0, ...pages.map((p) => { const m = p.name.match(re); return m ? +m[2] : 0; })) + 1;
+  return `${pre}${String(n).padStart(2, "0")}`;
 }
 
 export interface Master {

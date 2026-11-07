@@ -45,7 +45,7 @@ function band(x: number, y: number, w: number, h: number, r: number, name = "Ban
 function topBar(): SceneNode[] {
   return [
     band(60, 45, 2360, 75, 37),
-    textBox(110, 67, 1250, 60, [[run("ATELIER - {{atelier}}", "Arial Black", 42, BLUE, 900)]], "left", "Titre de l'atelier"),
+    textBox(110, 67, 1250, 60, [[run("{{entete}} - {{atelier}}", "Arial Black", 42, BLUE, 900)]], "left", "Titre de l'atelier"),
     textBox(1150, 70, 1050, 50, [[run("{{séquence}} - Feuille {{feuille}}", "Arial", 34, BLUE)]], "right", "Séquence et feuille"),
     ...pastille(2290, 25, 115),
   ];
@@ -54,7 +54,7 @@ function topBar(): SceneNode[] {
 function bottomBar(): SceneNode[] {
   // repère local : haut du bandeau en y = 0
   const t = textBox(95, 8, 670, 60, [
-    [run("ATELIER - {{atelier}}", "Arial Black", 22, BLUE, 900)],
+    [run("{{entete}} - {{atelier}}", "Arial Black", 22, BLUE, 900)],
     [run("FIN Feuille {{feuille}}", "Arial", 22, BLUE, 700), run(" - {{séquence}}", "Arial", 22, BLUE)],
   ], "left", "Fin de feuille");
   return [band(0, 0, 780, 70, 12), ...pastille(18, 7, 56), t];

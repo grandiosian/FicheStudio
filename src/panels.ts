@@ -2,7 +2,7 @@
 import { store } from "./store";
 import { selectionBoxes, render as renderCanvas, zoomToFit } from "./canvas";
 import {
-  newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas,
+  newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
   type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page,
 } from "./model";
 import { mul, rotateAt, rotationOf, scaleAt, translate, boxOfPoints, type Box } from "./geom";
@@ -53,8 +53,9 @@ function goPage(i: number) {
 }
 
 /** Nouvelle feuille : même format, mêmes parties, même gabarit (barres haut/bas ajoutées d'office). */
-function nextPage(cur: Page): Page {
-  const p = newPage(cur.width, cur.height, `Feuille ${String(store.doc.pages.length + 1).padStart(2, "0")}`);
+function nextPage(cur: Page, kind: SheetKind = cur.kind ?? "fiche"): Page {
+  const p = newPage(cur.width, cur.height, nextSheetName(store.doc.pages, kind));
+  p.kind = kind;
   p.sections = cur.sections; p.split = cur.split; p.master = cur.master; p.masterMode = cur.masterMode; p.background = cur.background;
   p.fields = { ...(cur.fields ?? {}) };
   return p;
@@ -65,11 +66,11 @@ function refreshPages() {
   const ms = store.doc.masters;
   el.innerHTML = `
     <div class="panel-head"><h3>Feuilles</h3>
-      <button data-a="add" title="Ajouter une feuille (même gabarit et même découpage)">＋</button>
+      <button data-a="add" title="Ajouter une feuille : fiche, ressource, évaluation… (même gabarit et même découpage)">＋ ▾</button>
       <button data-a="dup" title="Dupliquer la feuille">⧉</button>
       <button data-a="del" title="Supprimer la feuille">🗑</button>
       <button data-a="l2p" title="Calques → feuilles : faire une feuille de chaque calque choisi" ${store.editingMaster ? "disabled" : ""}>⇉</button></div>
-    <ol class="page-list">${store.doc.pages.map((p, i) => `<li class="${!store.editingMaster && i === store.pageIndex ? "on" : ""}" data-i="${i}"><span class="num">${i + 1}</span><span class="nm">${esc(p.name)}</span><span class="badge">${(p.sections ?? 1) > 1 ? `✂${p.sections}` : ""}${p.master ? " ▤" : ""}</span></li>`).join("")}</ol>
+    <ol class="page-list">${store.doc.pages.map((p, i) => `<li class="${!store.editingMaster && i === store.pageIndex ? "on" : ""}" data-i="${i}"><span class="num">${i + 1}</span><span class="kind-tag k-${p.kind ?? "fiche"}" title="${SHEET_KINDS[p.kind ?? "fiche"].label}">${SHEET_KINDS[p.kind ?? "fiche"].prefix}</span><span class="nm">${esc(p.name)}</span><span class="badge">${(p.sections ?? 1) > 1 ? `✂${p.sections}` : ""}${p.master ? " ▤" : ""}</span></li>`).join("")}</ol>
     <div class="panel-head sub"><h3>Gabarits</h3>
       <button data-a="m-atelier" title="Nouveau gabarit « Atelier » (barres haut et bas)">＋ Atelier</button>
       <button data-a="m-empty" title="Nouveau gabarit vide">＋</button></div>
@@ -107,10 +108,27 @@ function refreshPages() {
   });
   const cur = () => store.doc.pages[store.pageIndex];
   el.querySelector<HTMLElement>('[data-a="l2p"]')!.onclick = () => layerPagesDialog((msg) => document.dispatchEvent(new CustomEvent("status", { detail: msg })));
-  el.querySelector<HTMLElement>('[data-a="add"]')!.onclick = () => store.commit(() => {
-    store.doc.pages.splice(store.pageIndex + 1, 0, nextPage(cur()));
-    store.pageIndex++; store.editingMaster = null; store.selection = [];
-  });
+  el.querySelector<HTMLElement>('[data-a="add"]')!.onclick = (e) => {
+    // menu des types de feuille
+    document.querySelector(".pop-menu")?.remove();
+    const m = document.createElement("div");
+    m.className = "pop-menu menu-body";
+    m.innerHTML = (Object.keys(SHEET_KINDS) as SheetKind[]).map((k) =>
+      `<button data-k="${k}"><span class="kind-tag k-${k}">${SHEET_KINDS[k].prefix}</span> ${SHEET_KINDS[k].label}<small>nom ${nextSheetName(store.doc.pages, k)}, en-tête « ${SHEET_KINDS[k].entete} »</small></button>`).join("");
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    m.style.left = `${r.left}px`; m.style.top = `${r.bottom + 4}px`;
+    document.body.appendChild(m);
+    m.onclick = (ev) => {
+      const k = (ev.target as HTMLElement).closest("button")?.dataset.k as SheetKind | undefined;
+      m.remove();
+      if (!k) return;
+      store.commit(() => {
+        store.doc.pages.splice(store.pageIndex + 1, 0, nextPage(cur(), k));
+        store.pageIndex++; store.editingMaster = null; store.selection = [];
+      });
+    };
+    setTimeout(() => document.addEventListener("click", function off(ev) { if (!m.contains(ev.target as Node)) { m.remove(); document.removeEventListener("click", off); } }), 0);
+  };
   el.querySelector<HTMLElement>('[data-a="dup"]')!.onclick = () => store.commit(() => {
     const c = structuredClone(cur());
     c.id = uid("p");
@@ -140,6 +158,7 @@ function refreshPages() {
 // ------------------------------------------------------------------ calques
 
 const ICON: Record<string, string> = { group: "▣", shape: "◆", path: "✎", text: "T", image: "🖼" };
+const STEP_ICON = `<span class="step-ic" title="Étape de correction">⏵</span>`;
 const expanded = new Set<string>(); // replié par défaut : un document importé compte des milliers d'objets
 
 function refreshLayers() {
@@ -162,7 +181,7 @@ function refreshLayers() {
       <button class="lock" data-a="lock" title="Verrouiller">${n.locked ? "🔒" : "·"}</button>
       ${isLayer || n.type === "group" ? `<button class="tag" data-a="tag" title="Couleur du calque / groupe" style="--tag:${n.tag ?? "transparent"}"></button>` : ""}
       <span class="ic">${isLayer ? (n.type === "group" && n.anchor && n.anchor !== "none" ? (n.anchor === "top" ? "⤒" : "⤓") : "≡") : n.type === "group" && n.mask ? "◐" : ICON[n.type]}</span>
-      <span class="nm">${esc(n.name || "")}</span></li>`);
+      <span class="nm">${esc(n.name || "")}</span>${n.step ? STEP_ICON : ""}</li>`);
     if (hasKids && expanded.has(n.id)) {
       for (const k of kids) row(k, depth + 1, false);
       if (n.type === "group" && n.mask) row(n.mask, depth + 1, false);
@@ -406,7 +425,8 @@ function refreshProps() {
   parts.push(`<section><h4>${one ? esc(one.name || one.type) : `${nodes.length} objets`}</h4>
     <div class="grid2">${field("X (mm)", "x", n1(toMm(b.x)))}${field("Y (mm)", "y", n1(toMm(b.y)))}
     ${field("L (mm)", "w", n1(toMm(b.w)))}${field("H (mm)", "h", n1(toMm(b.h)))}
-    ${one ? field("Rotation (°)", "rot", n1(rot)) : ""}${field("Opacité (%)", "op", String(Math.round((one?.opacity ?? 1) * 100)))}</div></section>`);
+    ${one ? field("Rotation (°)", "rot", n1(rot)) : ""}${field("Opacité (%)", "op", String(Math.round((one?.opacity ?? 1) * 100)))}</div>
+    <label class="chk" title="En présentation, l'objet est masqué au départ puis révélé pas à pas (→ ou Espace)"><input type="checkbox" data-k="step" ${nodes.every((n) => n.step) ? "checked" : ""}> Étape de correction (présentation)</label></section>`);
   if (vec.length) {
     const v = vec[0];
     const dashKind = !v.stroke.dash ? "solid" : v.stroke.dash[0] < 0.5 ? "dot" : "dash";
@@ -499,6 +519,8 @@ function bindProps(el: HTMLElement, nodes: SceneNode[], b: Box) {
         const cur = (rotationOf(mul(store.parentCumulative(n.id), n.transform)) * 180) / Math.PI;
         const c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
         store.commit(() => transformNode(n, rotateAt(((num - cur) * Math.PI) / 180, c), store.parentCumulative(n.id), false));
+      } else if (k === "step") {
+        store.commit(() => { for (const n of nodes) n.step = (inp as HTMLInputElement).checked || undefined; });
       } else if (k === "op" && !isNaN(num)) {
         store.commit(() => { for (const n of nodes) n.opacity = Math.max(0, Math.min(1, num / 100)); });
       } else if (k.startsWith("fill.")) applyToVectors((n) => { n.fill = setPaint(n.fill, k.slice(5), v); });
@@ -587,6 +609,7 @@ function docProps() {
     <p class="hint">Sélectionnez un texte puis choisissez « Titre numéroté : niveau 1, 2 ou 3 ».</p></section>
     <section><h4>Feuille « ${esc(p.name)} »</h4>
     <label class="fld wide"><span>Nom de la feuille (nom du PDF)</span><input data-p="name" value="${esc(p.name)}"></label>
+    <label class="fld wide"><span>Type de feuille <code>{{entete}}</code></span><select data-p="kind">${(Object.keys(SHEET_KINDS) as SheetKind[]).map((k) => `<option value="${k}" ${(p.kind ?? "fiche") === k ? "selected" : ""}>${SHEET_KINDS[k].prefix} · ${SHEET_KINDS[k].label} — ${SHEET_KINDS[k].entete}</option>`).join("")}</select></label>
     <label class="fld wide"><span>Format</span><select data-d="preset"><option value="">Personnalisé</option>${PRESETS.map(([n, w, h]) => `<option value="${w}x${h}" ${Math.abs(toMm(p.width) - w) < 0.6 && Math.abs(toMm(p.height) - h) < 0.6 ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     <div class="grid2"><label class="fld"><span>Largeur (mm)</span><input data-d="pw" value="${n1(toMm(p.width))}"></label><label class="fld"><span>Hauteur (mm)</span><input data-d="ph" value="${n1(toMm(p.height))}"></label>
       <label class="fld"><span>Découpage</span><select data-p="sections">
@@ -649,12 +672,13 @@ function bindDocProps(el: HTMLElement) {
     (inp as HTMLInputElement).onchange = () => {
       const v = (inp as HTMLInputElement).value;
       store.commit(() => {
-        for (const p of k === "name" ? [store.page] : pages()) {
+        for (const p of k === "name" || k === "kind" ? [store.page] : pages()) {
           if (k === "name") p.name = v || p.name;
           if (k === "sections") p.sections = +v as 1 | 2 | 3;
           if (k === "split") p.split = v as "h" | "v";
           if (k === "master") p.master = v || null;
           if (k === "masterMode") p.masterMode = v as "sheet" | "each";
+          if (k === "kind") p.kind = v as SheetKind;
         }
       });
     };

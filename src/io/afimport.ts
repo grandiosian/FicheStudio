@@ -482,6 +482,7 @@ const mimeOf = (name: string) => {
 };
 
 export async function importAffinity(buf: ArrayBuffer, name: string, opts: { dir?: string } = {}): Promise<{ doc: Doc; report: ImportReport }> {
+  const importedAt = Date.now();
   const arc = new AfArchive(new Uint8Array(buf));
   const e = arc.byName("doc.dat");
   if (!e) throw new Error("doc.dat introuvable dans le fichier");
@@ -522,6 +523,7 @@ export async function importAffinity(buf: ArrayBuffer, name: string, opts: { dir
   const doc: Doc = {
     ...newDoc(name.replace(/\.(af|afdesign|afpub|afphoto)$/i, "")), dpi,
     pages, assets: im.assets,
+    source: { name, ...(opts.dir ? { dir: opts.dir } : {}), importedAt },
   };
   doc.fields.atelier = doc.name;
   return { doc, report: { warnings: im.warnings } };

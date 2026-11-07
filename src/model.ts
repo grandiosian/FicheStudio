@@ -199,6 +199,8 @@ export interface Doc {
   numbering: Numbering;
   /** Variante de disposition de la charte (numérotation et titres). */
   charte?: string;
+  /** Fichier Affinity d'origine (pour le réimporter) : nom, dossier sur le Mac s'il est connu, date d'import. */
+  source?: { name: string; dir?: string; importedAt: number };
 }
 
 // ------------------------------------------------------------------ fabriques

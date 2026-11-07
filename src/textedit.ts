@@ -8,6 +8,14 @@ import { fmt } from "./geom";
 
 let editor: HTMLDivElement | null = null;
 let editingId: string | null = null;
+let offset = { x: 0, y: 0 }; // position du bloc dans le repère du texte
+
+/** Zoom ou déplacement de la vue pendant l'édition : le bloc suit le texte. */
+document.addEventListener("view", () => {
+  if (!editor || !editingId || !store.find(editingId)) return;
+  const M = screenMatrixOf(editingId);
+  editor.style.transform = `matrix(${M.map(fmt).join(",")}) translate(${fmt(offset.x)}px, ${fmt(offset.y)}px)`;
+});
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -35,10 +43,12 @@ export function openTextEditor(id: string) {
   div.contentEditable = "true";
   div.spellcheck = true;
   div.lang = "fr";
+  offset = { x: f.x, y: f.y };
   div.style.transform = `matrix(${M.map(fmt).join(",")}) translate(${fmt(f.x)}px, ${fmt(f.y)}px)`;
-  if (n.frame) { div.style.width = `${n.frame.w}px`; div.style.minHeight = `${n.frame.h}px`; }
-  if (n.noWrap) div.style.whiteSpace = "pre"; // texte artistique : pas de retour automatique
-  else { div.style.whiteSpace = "pre"; div.style.minWidth = "40px"; }
+  if (n.frame) {
+    div.style.width = `${n.frame.w}px`; div.style.minHeight = `${n.frame.h}px`;
+    if (n.noWrap) div.style.whiteSpace = "pre"; // texte artistique : pas de retour automatique
+  } else { div.style.whiteSpace = "pre"; div.style.minWidth = "40px"; }
   div.innerHTML = n.paragraphs.map((p, i) => {
     const base = p.leading ?? Math.max(...p.runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
     const lh = p.runs.some((r) => r.leading) ? Math.max(...p.runs.map((r) => r.leading ?? base)) : base;

@@ -192,6 +192,13 @@ avec une largeur ajustée pour que la mise en page ne bouge pas.
 
 ### Fidélité avec Affinity
 
+**Réimporter depuis Affinity** (menu FicheStudio) : quand le lecteur .af progresse, un document déjà
+ouvert garde l'ancien import (les onglets sont restaurés tels quels au rechargement). Cette commande
+relit le .af d'origine (dossier mémorisé à l'import, sinon recherche dans le dossier de l'explorateur de
+documents, sinon sélection du fichier) et remplace le contenu venu d'Affinity, en gardant ce qui a été
+ajouté dans FicheStudio : calques et éléments créés après l'import, compétences, étapes de correction,
+étiquettes, visibilité, gabarits et réglages. ⌘Z annule.
+
 - Images **liées** dans le .af (le fichier ne garde que le chemin de l'original, ou un alias macOS) : en
   local (`npm run dev`), le serveur retrouve l'original — même si le dossier a été déplacé — et convertit
   TIFF / PSD en PNG (sips). Sur le site publié, ces images apparaissent comme liens à relier.

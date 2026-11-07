@@ -6,6 +6,7 @@ import { loadCharteInit, prefsDialog } from "./prefs";
 import { hasCharteMasters, updateCharteMasters } from "./charte";
 import { openPresentSpace, initPresentSpace } from "./presentspace";
 import { docBrowser } from "./docbrowser";
+import { reimportAffinity } from "./reimport";
 import { showCharte, checkCharteDialog, variantDialog } from "./charteview";
 import { initPanels, refreshCompetencesPanel, tablePicker, templatePicker, copyCharteToLayers } from "./panels";
 import { closeTextEditor, isEditingText, openTextEditor } from "./textedit";
@@ -249,6 +250,15 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
   present: () => { closeTextEditor(); store.editingMaster = null; startPresentation(); },
   presentmenu: () => { closeTextEditor(); store.editingMaster = null; openPresentSpace(); },
   docs: () => docBrowser(openFile),
+  reimport: async () => {
+    closeTextEditor();
+    status("Réimport du fichier Affinity…");
+    try {
+      const msg = await reimportAffinity(() => pickFile(".af,.afdesign,.afpub,.afphoto"));
+      status(msg);
+      checkLinks();
+    } catch (e) { console.error(e); status(`Réimport impossible : ${(e as Error).message}`, true); }
+  },
   l2p: () => { if (!store.editingMaster) layerPagesDialog((msg) => status(msg)); },
   charte: () => showCharte(),
   chartecheck: () => checkCharteDialog(),

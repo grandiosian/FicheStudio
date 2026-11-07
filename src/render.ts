@@ -57,7 +57,8 @@ function attrs(c: Ctx, n: SceneNode, editable: boolean): string {
   const a: string[] = [];
   if (c.opts.editor && editable) a.push(`data-id="${n.id}"`);
   if (!isIdentity(n.transform)) a.push(`transform="${svgMatrix(n.transform)}"`);
-  if (n.opacity < 1) a.push(`style="opacity:${fmt(n.opacity)}"`);
+  // attribut (et non style) : un chemin a déjà son propre attribut style, deux « style » rendent le SVG invalide
+  if (n.opacity < 1) a.push(`opacity="${fmt(n.opacity)}"`);
   if (!c.opts.editor && n.name) a.push(`inkscape:label="${esc(n.name)}"`);
   return a.join(" ");
 }

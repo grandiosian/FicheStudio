@@ -72,6 +72,9 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
 - Annuler/rétablir (200 niveaux), sauvegarde automatique locale (IndexedDB).
 - **Barre d'outils** en groupes : sélection (V, A, H) · dessin (P, L, M, E) · texte (T) · insertion
   (modèles, tableau, image) ; la lettre du raccourci est rappelée dans le coin de chaque bouton.
+- **Onglets de documents** : nom lisible (sans « AT_ » ni tirets bas), pastille de couleur selon le type de
+  document, **aperçu de la feuille au survol** (nom complet, nombre de feuilles, modifications), liste
+  « ▾ n » de tous les documents ouverts, fermeture par clic du milieu.
 - **Vue isolée** (touche **I**, clic droit › Isoler, ou Propriétés › ◎ Isoler) : seuls la sélection, ou le
   calque actif, restent affichés, cadrés à l'écran, pour travailler dessus ; les nouveaux objets vont
   dans l'élément isolé. **I** ou **Échap** (sans sélection) ramène à la vue complète, exactement au
@@ -188,6 +191,15 @@ l'autorisation une fois), soit des fichiers ajoutés via « Ajouter des polices�
 avec une largeur ajustée pour que la mise en page ne bouge pas.
 
 ### Fidélité avec Affinity
+
+- Images **liées** dans le .af (le fichier ne garde que le chemin de l'original, ou un alias macOS) : en
+  local (`npm run dev`), le serveur retrouve l'original — même si le dossier a été déplacé — et convertit
+  TIFF / PSD en PNG (sips). Sur le site publié, ces images apparaissent comme liens à relier.
+- Formes avec texte (« TxtS ») importées ; mots plus longs que la ligne coupés au bord du cadre et
+  espace avant du premier paragraphe ignoré en haut du cadre, comme Affinity.
+- Texte artistique à l'échelle réelle (groupes × sa propre transformation) ; masques attachés aux
+  images et groupes ; alignement vertical des cadres (haut / milieu / bas) ; soulignement ; listes à puces
+  (puce + retrait suspendu) ; coins des rectangles selon leur type (aucun, arrondi, coupé).
 
 La composition du texte reprend celle d'Affinity (mesures faites dans Affinity 3.3) : capitales
 alignées sur le haut du cadre, interligne idéal de la police × interligne relatif, retraits,

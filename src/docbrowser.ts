@@ -241,7 +241,12 @@ export function docBrowser(onPick: (f: File) => void | Promise<void>, title = "D
     entries = (r.files as { name: string; path: string; size: number; modified: number }[]).map((f) => ({
       ...f,
       thumb: /\.af(design|pub)?$/i.test(f.name) ? `__localdocs/thumb?${q(f.path + f.name)}` : undefined,
-      get: async () => new File([await (await fetch(`__localdocs/file?${q(f.path + f.name)}`)).blob()], f.name),
+      get: async () => {
+        const file = new File([await (await fetch(`__localdocs/file?${q(f.path + f.name)}`)).blob()], f.name);
+        // dossier du fichier sur le Mac : sert à retrouver les images liées d'un .af
+        (file as File & { fsDir?: string }).fsDir = `${r.root}/${f.path}`.replace(/\/$/, "");
+        return file;
+      },
     }));
     source = r.root.split("/").pop() || r.root;
     src.textContent = `${source} · ${entries.length} fichier(s)`;

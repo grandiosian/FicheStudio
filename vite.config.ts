@@ -1,7 +1,9 @@
 import { defineConfig, type Connect } from "vite";
-import { createReadStream, existsSync, openSync, readSync, closeSync, readdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve, relative, sep } from "node:path";
+import { createReadStream, existsSync, openSync, readSync, closeSync, readdirSync, statSync, mkdirSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, extname, join, resolve, relative, sep } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 // Développement seulement : lecture d'un dossier du Mac pour l'explorateur de documents
 // (le sélecteur de dossier du navigateur n'est pas disponible partout). Limité au dossier
@@ -56,9 +58,64 @@ function thumb(file: string): Buffer | null {
     return s >= 0 && s < 256 && e > s && e + 8 <= n ? buf.subarray(s, e + 8) : null;
   } finally { closeSync(fd); }
 }
+// ---- images liées des fichiers Affinity (le .af ne garde que le chemin de l'original)
+const IMG = /\.(png|jpe?g|gif|webp|svg|tiff?|psd|heic|bmp)$/i;
+const inHome = (p: string) => p === HOME || p.startsWith(HOME + sep);
+/** Retrouve l'original : chemin enregistré, sinon même fin de chemin à côté du .af (dossier déplacé),
+ *  sinon même nom de fichier sous le dossier du .af. */
+function findImage(path: string, afdir: string | null): string | null {
+  const abs = resolve(path);
+  if (inHome(abs) && IMG.test(abs) && existsSync(abs)) return abs;
+  if (!afdir || !inHome(resolve(afdir))) return null;
+  const parts = abs.split(sep).filter(Boolean);
+  for (const base of [afdir, dirname(afdir), dirname(dirname(afdir))]) {
+    for (let k = 1; k < parts.length; k++) {
+      const cand = join(base, ...parts.slice(k));
+      if (inHome(cand) && existsSync(cand)) return cand;
+    }
+  }
+  const name = basename(abs);
+  let found: string | null = null;
+  const walk = (dir: string, depth: number) => {
+    if (found || depth > 6) return;
+    let items: string[] = [];
+    try { items = readdirSync(dir); } catch { return; }
+    for (const n of items) {
+      if (found || n.startsWith(".") || SKIP.has(n)) continue;
+      const p = join(dir, n);
+      if (n === name) { found = p; return; }
+      try { if (statSync(p).isDirectory()) walk(p, depth + 1); } catch { /* illisible */ }
+    }
+  };
+  walk(resolve(afdir), 0);
+  return found;
+}
+/** Les navigateurs n'affichent pas le TIFF ni le PSD : conversion en PNG (sips, macOS), gardée en cache. */
+function browserImage(file: string): { path: string; type: string } {
+  const ext = extname(file).toLowerCase();
+  const direct: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
+  if (direct[ext]) return { path: file, type: direct[ext] };
+  const st = statSync(file);
+  const dir = join(tmpdir(), "fichestudio-images");
+  mkdirSync(dir, { recursive: true });
+  const out = join(dir, `${createHash("sha1").update(`${file}:${st.mtimeMs}`).digest("hex")}.png`);
+  if (!existsSync(out)) execFileSync("sips", ["-s", "format", "png", file, "--out", out], { stdio: "ignore" });
+  return { path: out, type: "image/png" };
+}
+
 const localDocs: Connect.NextHandleFunction = (req, res) => {
   const u = new URL(req.url ?? "/", "http://x");
   const json = (v: unknown, code = 200) => { res.statusCode = code; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify(v)); };
+  if (u.pathname === "/image") {
+    const file = findImage(u.searchParams.get("path") ?? "", u.searchParams.get("afdir"));
+    if (!file) return json({ error: "Image introuvable." }, 404);
+    try {
+      const img = browserImage(file);
+      res.setHeader("Content-Type", img.type);
+      res.setHeader("Cache-Control", "max-age=3600");
+      return createReadStream(img.path).pipe(res);
+    } catch { return json({ error: "Conversion impossible." }, 500); }
+  }
   if (u.pathname === "/home") {
     const suggestions = ["Documents/PROD_EDUCNAT_2025-2026", "Documents", "Desktop"].map((d) => join(HOME, d)).filter((d) => existsSync(d));
     return json({ home: HOME, suggestions });

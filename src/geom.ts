@@ -105,6 +105,7 @@ export function shapeToSubpaths(s: ShapeNode): SubPath[] {
         // ax,ay : direction vers le point d'entrée ; bx,by : vers la sortie
         if (r <= 0) { pts.push({ x: px, y: py }); return; }
         const p1 = { x: px + ax * r, y: py + ay * r }, p2 = { x: px + bx * r, y: py + by * r };
+        if (s.corner === "chamfer") { pts.push(p1, p2); return; }
         pts.push({ ...p1, out: { x: p1.x - ax * r * K, y: p1.y - ay * r * K } });
         pts.push({ ...p2, in: { x: p2.x - bx * r * K, y: p2.y - by * r * K } });
       };

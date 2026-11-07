@@ -57,6 +57,7 @@ export interface ShapeNode extends Base {
   kind: ShapeKind;
   x: number; y: number; w: number; h: number;
   radius: [number, number, number, number]; // px, coins HG HD BD BG (rect)
+  corner?: "round" | "chamfer";              // forme des coins (rect) : arrondis par défaut, ou coupés
   param: number;                            // triangle/losange : position du sommet ; flèche : épaisseur
   fill: Paint;
   stroke: Stroke;
@@ -89,6 +90,7 @@ export interface TextNode extends Base {
   type: "text";
   frame: { x: number; y: number; w: number; h: number } | null; // null = texte artistique (origine = ligne de base)
   paragraphs: Paragraph[];
+  valign?: "top" | "middle" | "bottom"; // position verticale du texte dans le cadre (haut par défaut)
 }
 
 export interface ImageNode extends Base {

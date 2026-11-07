@@ -71,7 +71,8 @@ export function layoutText(t: TextNode): Line[] {
       const runs = cur.length ? cur.map((s) => s.run) : fallback ? [fallback] : [];
       const cap = Math.max(0, ...runs.map((r) => fontMetrics(r).cap * r.size));
       const lh = Math.max(0, ...runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
-      if (firstLine) baseline += (frame ? p.spaceBefore + cap : 0);
+      // comme Affinity : l'espace avant du 1er paragraphe est ignoré en haut du cadre
+      if (firstLine) baseline += (frame ? cap : 0);
       else baseline += (paraFirst ? prevAfter + p.spaceBefore : 0) + lh;
       firstLine = false;
       paraFirst = false;
@@ -85,18 +86,36 @@ export function layoutText(t: TextNode): Line[] {
     for (const tk of toks) {
       if (tk.kind === "break") { flush(false); continue; }
       if (tk.kind === "tab") {
-        const nx = (Math.floor(x / tab + 1e-6) + 1) * tab;
+        // avant le retrait gauche (puce d'un retrait suspendu), la tabulation s'arrête sur le retrait
+        const nx = x < left - 1e-6 ? left : (Math.floor(x / tab + 1e-6) + 1) * tab;
         cur.push({ run: tk.run, text: "\t", x, width: nx - x });
         x = nx;
         continue;
       }
+      const put = (text: string, w: number) => {
+        const prev = cur[cur.length - 1];
+        if (prev && prev.run === tk.run && prev.text !== "\t") { prev.text += text; prev.width += w; }
+        else cur.push({ run: tk.run, text, x, width: w });
+        x += w;
+      };
       const w = measure(tk.run, tk.text);
+      if (tk.kind === "word" && frame && w > avail - left) {
+        // mot plus long que la ligne (ex. « ……… » sans espace) : coupé au bord du cadre, comme Affinity
+        if (cur.some((s) => s.text.trim())) flush(false);
+        let i = 0;
+        while (i < tk.text.length) {
+          let j = i + 1;
+          while (j < tk.text.length && x + measure(tk.run, tk.text.slice(i, j + 1)) <= avail) j++;
+          const part = tk.text.slice(i, j);
+          put(part, measure(tk.run, part));
+          i = j;
+          if (i < tk.text.length) flush(false);
+        }
+        continue;
+      }
       if (tk.kind === "word" && x + w > avail && cur.some((s) => s.text.trim())) flush(false);
       if (tk.kind === "space" && !cur.length && !paraFirst) continue; // espaces en début de ligne coupée
-      const prev = cur[cur.length - 1];
-      if (prev && prev.run === tk.run && prev.text !== "\t") { prev.text += tk.text; prev.width += w; }
-      else cur.push({ run: tk.run, text: tk.text, x, width: w });
-      x += w;
+      put(tk.text, w);
     }
     flush(true);
     prevAfter = p.spaceAfter;
@@ -125,12 +144,19 @@ export function layoutText(t: TextNode): Line[] {
     for (const s of l.spans) s.x += x0;
     l.spans = l.spans.filter((s) => s.text !== "\t");
   }
+  // alignement vertical dans le cadre (le texte qui déborde reste calé en haut)
+  if (frame && lines.length && t.valign && t.valign !== "top") {
+    const last = lines[lines.length - 1];
+    const free = frame.h - (last.y + last.height * 0.25 - frame.y);
+    const dy = free > 0 ? (t.valign === "middle" ? free / 2 : free) : 0;
+    if (dy) for (const l of lines) l.y += dy;
+  }
   return lines;
 }
 
 /** Hauteur occupée par le texte (pour signaler un débordement de cadre). */
 export function textHeight(t: TextNode): number {
-  const ls = layoutText(t);
+  const ls = layoutText({ ...t, valign: undefined });
   if (!ls.length) return 0;
   const last = ls[ls.length - 1];
   return last.y + last.height * 0.3 - (t.frame ? t.frame.y : 0);

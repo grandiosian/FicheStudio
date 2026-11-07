@@ -38,10 +38,10 @@ export function openTextEditor(id: string) {
   div.style.transform = `matrix(${M.map(fmt).join(",")}) translate(${fmt(f.x)}px, ${fmt(f.y)}px)`;
   if (n.frame) { div.style.width = `${n.frame.w}px`; div.style.minHeight = `${n.frame.h}px`; }
   else { div.style.whiteSpace = "pre"; div.style.minWidth = "40px"; }
-  div.innerHTML = n.paragraphs.map((p) => {
+  div.innerHTML = n.paragraphs.map((p, i) => {
     const lh = Math.max(...p.runs.map((r) => fontMetrics(r).ideal * r.size)) * (p.lineHeight || 1);
     const inner = p.runs.filter((r) => r.text).map((r) => `<span style="${runCss(r)}">${esc(r.text).replace(/\n/g, "<br>")}</span>`).join("");
-    return `<div data-level="${p.level ?? 0}" style="text-align:${p.align};line-height:${fmt(lh)}px;margin-top:${fmt(p.spaceBefore)}px;margin-bottom:${fmt(p.spaceAfter)}px;padding-left:${fmt(p.leftIndent ?? 0)}px;padding-right:${fmt(p.rightIndent ?? 0)}px;text-indent:${fmt(p.firstIndent ?? 0)}px;tab-size:${fmt(p.tabStop || 50)}px">${inner || `<span style="${runCss(p.runs[0] ?? first)}"><br></span>`}</div>`;
+    return `<div data-level="${p.level ?? 0}" style="text-align:${p.align};line-height:${fmt(lh)}px;margin-top:${fmt(i === 0 ? 0 : p.spaceBefore)}px;margin-bottom:${fmt(p.spaceAfter)}px;padding-left:${fmt(p.leftIndent ?? 0)}px;padding-right:${fmt(p.rightIndent ?? 0)}px;text-indent:${fmt(p.firstIndent ?? 0)}px;tab-size:${fmt(p.tabStop || 50)}px">${inner || `<span style="${runCss(p.runs[0] ?? first)}"><br></span>`}</div>`;
   }).join("") || `<div><span style="${runCss(first)}"><br></span></div>`;
   stageEl().appendChild(div);
   editor = div;

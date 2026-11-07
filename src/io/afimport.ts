@@ -24,6 +24,8 @@ class Importer {
   assetBySrc = new Map<string, string>();
   warnings: Record<string, number> = {};
   groupTextScale = 1;
+  /** échelle cumulée des groupes (Xfrm) : le texte artistique suit l'échelle réelle, pas FTxS */
+  groupScale = 1;
   constructor(public arc: AfArchive, public root: KsObj) {
     const stack: unknown[] = [root];
     while (stack.length) {
@@ -141,14 +143,36 @@ class Importer {
         return g;
       }
     } else if (cls === "TxtF" || cls === "TxtA") out = this.text(n, parentCum);
+    else if (cls === "TxtS") {
+      // forme avec texte (« texte dans une forme ») : la forme, et son texte s'il y en a un
+      const shape = this.shape(n, parentCum);
+      let txt: TextNode | null = null;
+      try { txt = this.text(n, parentCum); } catch { /* pas de texte lisible */ }
+      const has = txt?.paragraphs.some((p) => p.runs.some((r) => r.text.replace(/\u0000/g, "").trim()));
+      if (has && txt) {
+        shape.visible = true; shape.opacity = 1;
+        out = { ...this.base(n, "Forme avec texte"), transform: [...IDENTITY], type: "group", children: [shape, txt], mask: null };
+      } else out = shape;
+    }
     else if (cls === "ImgN") out = this.image(n);
     else if (kids.length || ["LogN", "Scop", "Grup", "Node", "SymN", "SymI"].includes(cls)) {
-      const saved = this.groupTextScale;
+      const saved = this.groupTextScale, savedG = this.groupScale;
       if (n.FTxS) this.groupTextScale *= scaleOf(mat(n.FTxS));
+      this.groupScale *= scaleOf(own);
       const children = kids.map((k) => this.node(k, cum)).filter(Boolean) as SceneNode[];
-      this.groupTextScale = saved;
+      this.groupTextScale = saved; this.groupScale = savedG;
       out = { ...this.base(n, cls === "Grup" ? "Groupe" : "Calque"), type: "group", children, mask: null };
     } else this.note(`objet ${cls} non pris en charge`);
+    // masque attaché (« AdCh ») : une forme rangée dans l'image ou le groupe qui le découpe
+    const clip = ((n.AdCh as KsValue[] | undefined) ?? []).map((k) => this.res(k)).find((m) => m && (m.$class === "ShpN" || m.$class === "PCrv"));
+    if (out && clip) {
+      const mask = clip.$class === "ShpN" ? this.shape(clip, cum) : this.curve(clip, mul(cum, mat(clip.Xfrm)));
+      // masque invisible : il découpe seulement (la forme d'un « contenu dans une forme » reste, elle, dessinée)
+      mask.visible = false; mask.opacity = 1;
+      const inner = { ...out, transform: [...IDENTITY] as Mat, visible: true, opacity: 1 } as SceneNode;
+      const g: GroupNode = { ...this.base(n, out.name), type: "group", transform: out.transform, children: [inner], mask };
+      return g;
+    }
     return out;
   }
 
@@ -208,12 +232,16 @@ class Importer {
     const kinds: Record<string, ShapeKind> = { ShNR: "rect", ShpE: "ellipse", ShpT: "triangle", ShpD: "diamond", ShDA: "arrow" };
     const kind = kinds[shp.$class ?? ""] ?? "rect";
     if (!kinds[shp.$class ?? ""]) this.note(`forme ${shp.$class} importée comme rectangle`);
-    const cr = (nums(shp.ShCR) ?? [0, 0, 0, 0]).map((v) => v * rbase) as [number, number, number, number];
+    // coins liés : seul le 1er type / rayon compte. Type 0 = arrondi, 1 = coupé (chanfrein),
+    // 4 ou absent = aucun (ShCR garde alors le rayon par défaut 0,25, sans effet)
+    const ctype = ((shp.CTyp as number[] | undefined) ?? [])[0] ?? 4;
+    const r0 = ctype === 0 || ctype === 1 ? (nums(shp.ShCR)?.[0] ?? 0) * rbase : 0;
+    const cr: [number, number, number, number] = [r0, r0, r0, r0];
     const param = kind === "arrow" ? ((shp.Thck as number) ?? 0.4) : ((shp["Pos "] as number) ?? 0.5);
     const cum = mul(parentCum, transform);
     return {
       ...this.base(n, "Forme"), transform, type: "shape", kind, ...box,
-      radius: kind === "rect" ? cr : [0, 0, 0, 0], param, fill: this.fill(n), stroke: this.stroke(n, cum),
+      radius: kind === "rect" ? cr : [0, 0, 0, 0], ...(kind === "rect" && ctype === 1 ? { corner: "chamfer" as const } : {}), param, fill: this.fill(n), stroke: this.stroke(n, cum),
     };
   }
 
@@ -239,8 +267,16 @@ class Importer {
       const pts = [[fb[0], fb[1]], [fb[2], fb[1]], [fb[0], fb[3]], [fb[2], fb[3]]].map(([x, y]) => apply(toRot, { x, y }));
       const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
       frame = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+      // cadre en colonnes : le texte se coupe à la largeur de la 1re colonne, pas du cadre entier
+      const cols = nums(this.res(n.TxtH)?.ColW) ?? [], fw = fb[2] - fb[0];
+      // (une 2e colonne de largeur nulle n'est pas une vraie colonne : le texte prend alors tout le cadre)
+      if (cols.filter((c) => c > 1).length > 1 && fw > 0 && cols[0] < fw - 1) frame.w *= cols[0] / fw;
     } else origin = apply(toRot, { x: 0, y: 0 });
-    const ts = this.groupTextScale * (n.FTxS ? scaleOf(mat(n.FTxS)) : 1);
+    // texte artistique : les glyphes suivent l'échelle réelle (groupes × son propre Xfrm) ;
+    // texte encadré : corps absolu, corrigé seulement par les FTxS des groupes
+    const ts = n.$class === "TxtA"
+      ? this.groupScale * scaleOf(mat(n.Xfrm))
+      : this.groupTextScale * (n.FTxS ? scaleOf(mat(n.FTxS)) : 1);
     const paragraphs: Paragraph[] = [];
     const story = this.res(n.StSt);
     for (const bv of (story?.Blok as KsValue[] | undefined) ?? []) {
@@ -268,20 +304,29 @@ class Importer {
           else runs.push({ ...st, text: ch });
         }
         if (!runs.length) runs.push({ ...styleAt(pos), text: "" });
+        // liste à puces (LisA, type 1) : puce + tabulation en retrait suspendu, comme Affinity
+        const list = ((att?.Objs as KsValue[] | undefined) ?? []).map((o) => this.res(o)).find((o) => o?.$class === "LisA");
+        const bullet = list && list.Type === 1 && runs.some((r) => r.text.trim())
+          ? (((this.res(list.BulS as KsValue)?.Utf8 as string | undefined) ?? "•\t").replace(/\u0000/g, "") || "•\t") : null;
+        if (bullet) runs.unshift({ ...runs[0], text: bullet.includes("\t") ? bullet : `${bullet}\t` });
         // PAtt.Doub = [interligne relatif, interligne absolu, retrait gauche, retrait droit, retrait 1re ligne, espace avant, espace après, pas de tabulation…]
         const d = (att?.Doub as number[] | undefined) ?? [];
         const px = (i: number) => (typeof d[i] === "number" ? d[i] * ts : 0);
         paragraphs.push({
           align: (["left", "center", "right", "justify"] as const)[align] ?? "left",
           lineHeight: d[0] > 0.2 && d[0] < 5 ? d[0] : 1,
-          leftIndent: px(2), rightIndent: px(3), firstIndent: px(4), spaceBefore: px(5), spaceAfter: px(6),
+          leftIndent: px(2), rightIndent: px(3), spaceBefore: px(5), spaceAfter: px(6),
+          firstIndent: bullet && !d[4] ? -(((list?.ITab as number | undefined) ?? d[2] ?? 0) * ts) : px(4),
           tabStop: d[7] > 1 ? d[7] * ts : 50, level: 0, runs,
         });
         pos += pc.length + 1;
       }
       void chars;
     }
+    // TxtH.Algn : alignement vertical du cadre (0 haut, 1 milieu, 2 bas)
+    const va = (this.res(n.TxtH)?.Algn as number | undefined) ?? 0;
     const t: TextNode = {
+      ...(frame && va === 1 ? { valign: "middle" as const } : frame && va === 2 ? { valign: "bottom" as const } : {}),
       ...this.base(n, "Texte"),
       transform: mul(inv(parentCum), rot),
       type: "text",
@@ -305,27 +350,41 @@ class Importer {
       size: (((g?.Doub as number[] | undefined) ?? [50])[0] || 50) * scale,
       weight: (font?.Wegt as number) || 400,
       italic: !!font?.Ital,
-      underline: false,
+      underline: (((g?.Ints as number[] | undefined) ?? [0])[0] ?? 0) > 0, // GAtt.Ints[0] : soulignement
       color: col.color,
       opacity: col.opacity,
     };
   }
+
+  /** Dossier du fichier .af sur le disque (s'il est connu) : aide à retrouver les images liées. */
+  afDir: string | null = null;
 
   async loadAssets() {
     for (const e of this.arc.entries.values()) {
       if (!e.name?.startsWith("c/") || !e.size) continue;
       try {
         const ks = new KsStream(await this.arc.extract(e));
-        ks.parse();
+        const root = ks.parse();
         const data = ks.blobs.find((b) => b.length > 64);
-        if (!data) continue;
-        const mime = data[0] === 0x89 ? "image/png" : data[0] === 0xff ? "image/jpeg" : "application/octet-stream";
         const key = uid("a");
-        this.assets[key] = { mime, data: await toDataUrl(data, mime), name: e.name };
+        if (data && (data[0] === 0x89 || (data[0] === 0xff && data[1] === 0xd8))) {
+          // image incorporée : le fichier d'origine est dans le .af
+          const mime = data[0] === 0x89 ? "image/png" : "image/jpeg";
+          this.assets[key] = { mime, data: await toDataUrl(data, mime), name: e.name };
+        } else {
+          // image liée : le .af ne garde que le chemin de l'original (chaîne, ou alias macOS « book »)
+          const path = (data && bookmarkPath(data)) || findPath(root);
+          if (!path) continue;
+          const name = path.split("/").pop() || e.name;
+          const q = `path=${encodeURIComponent(path)}${this.afDir ? `&afdir=${encodeURIComponent(this.afDir)}` : ""}`;
+          this.assets[key] = { mime: mimeOf(name), name, link: { kind: "url", url: `__localdocs/image?${q}` } };
+          this.linked++;
+        }
         this.assetBySrc.set(e.name, key);
       } catch { this.note("ressource illisible"); }
     }
   }
+  linked = 0;
 }
 
 const sameStyle = (a: Run, b: Run) =>
@@ -352,12 +411,41 @@ function toDataUrl(b: Uint8Array, mime: string): Promise<string> {
   });
 }
 
-export async function importAffinity(buf: ArrayBuffer, name: string): Promise<{ doc: Doc; report: ImportReport }> {
+/** Chemin d'un alias macOS (« bookmark ») : les éléments du chemin sont les premières chaînes UTF-8. */
+export function bookmarkPath(b: Uint8Array): string | null {
+  if (b.length < 64 || String.fromCharCode(b[0], b[1], b[2], b[3]) !== "book") return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const comps: string[] = [];
+  let i = dv.getUint32(12, true) + 4;
+  while (i + 8 <= b.length) {
+    const len = dv.getUint32(i, true), type = dv.getUint32(i + 4, true);
+    if (len > 4096) break;
+    if (type === 0x0101) comps.push(new TextDecoder().decode(b.subarray(i + 8, i + 8 + len)));
+    else if (comps.length) break;
+    i += 8 + ((len + 3) & ~3);
+  }
+  return comps.length ? `/${comps.join("/")}` : null;
+}
+
+/** Premier chemin absolu de fichier trouvé dans un objet de lien. */
+function findPath(o: unknown): string | null {
+  if (typeof o === "string") return /^\/.+\.[a-z0-9]{2,5}$/i.test(o) ? o : null;
+  if (o && typeof o === "object") for (const v of Object.values(o)) { const p = findPath(v); if (p) return p; }
+  return null;
+}
+
+const mimeOf = (name: string) => {
+  const ext = name.split(".").pop()!.toLowerCase();
+  return ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" } as Record<string, string>)[ext] ?? "image/png";
+};
+
+export async function importAffinity(buf: ArrayBuffer, name: string, opts: { dir?: string } = {}): Promise<{ doc: Doc; report: ImportReport }> {
   const arc = new AfArchive(new Uint8Array(buf));
   const e = arc.byName("doc.dat");
   if (!e) throw new Error("doc.dat introuvable dans le fichier");
   const root = new KsStream(await arc.extract(e)).parse();
   const im = new Importer(arc, root);
+  im.afDir = opts.dir ?? null;
   await im.loadAssets();
   const docR = im.res(root.DocR as KsValue);
   const dpi = (im.res(root.UVCn as KsValue)?.UPPI as number) || 300;

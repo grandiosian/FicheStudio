@@ -11,6 +11,7 @@ import { initPanels, refreshCompetencesPanel, tablePicker, templatePicker, copyC
 import { closeTextEditor, isEditingText, openTextEditor } from "./textedit";
 import { copySelection, deleteSelection, duplicate, groupSelection, moveSelection, paste, ungroupSelection } from "./ops";
 import { newDoc, newImage, uid } from "./model";
+import { renderPage } from "./render";
 import { importAffinity } from "./io/afimport";
 import { buildAffinityScript } from "./io/affinityExport";
 import { download, exportSvg, parseNative, printPdf, saveNative } from "./io/export";
@@ -78,7 +79,7 @@ async function openFile(f: File) {
   status(`Ouverture de ${f.name}…`);
   try {
     if (/\.(af|afdesign|afpub|afphoto)$/i.test(f.name)) {
-      const { doc, report } = await importAffinity(await f.arrayBuffer(), f.name);
+      const { doc, report } = await importAffinity(await f.arrayBuffer(), f.name, { dir: (f as File & { fsDir?: string }).fsDir });
       if (!doc.pages.length) throw new Error("aucune page trouvée");
       store.openTab(doc);
       checkLinks();
@@ -285,6 +286,78 @@ const ACTIONS: Record<string, () => void | Promise<void>> = {
   z100: () => zoomBy((96 / store.doc.dpi) / view.zoom),
 };
 
+// ------------------------------------------------------------------ onglets de documents
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+/** Nom lisible : « AT_Les-objets-connectes-du-quotidien-2 » -> « Les objets connectes du quotidien 2 ». */
+const shortName = (n: string) => n.replace(/^(AT|EVAL|FICHE)[_-]+/i, "").replace(/[_-]+/g, " ").trim() || n;
+/** Pastille de couleur d'après le type de la première feuille (atelier, ressource, évaluation…). */
+const tabIcon = (d: { pages: { kind?: string }[] }) => {
+  const k = d.pages[0]?.kind ?? "fiche";
+  const c: Record<string, string> = { fiche: "#118eff", ressource: "#ff8c00", evalres: "#ff8c00", eval: "#ff4f44", synthese: "#cb64ff", peda: "#ffdc00", prof: "#ffdc00" };
+  return `<i style="background:${c[k] ?? "#118eff"}"></i>`;
+};
+function closeTabAsk(i: number) {
+  const name = (i === store.activeTab ? store.doc : store.tabs[i]?.doc)?.name ?? "";
+  if (store.isDirty(i) && !confirm(`Fermer « ${name} » ? Les modifications non enregistrées (fichier .fstudio) seront perdues.`)) return;
+  store.closeTab(i);
+}
+
+/** Aperçu au survol d'un onglet : la feuille affichée dans ce document, son nom complet, ses feuilles. */
+let peekTimer = 0;
+function peekSoon(tab: HTMLElement, i: number) {
+  clearTimeout(peekTimer);
+  peekTimer = window.setTimeout(() => peekShow(tab, i), 320);
+}
+function peekHide() { clearTimeout(peekTimer); document.querySelector("#tab-peek")?.remove(); }
+function peekShow(tab: HTMLElement, i: number) {
+  const t = store.tabs[i];
+  if (!t) return;
+  const active = i === store.activeTab;
+  const doc = active ? store.doc : t.doc;
+  const pi = Math.min(active ? store.pageIndex : t.pageIndex, doc.pages.length - 1);
+  const page = doc.pages[pi];
+  let svg = "";
+  try {
+    const { defs, body } = renderPage(doc, page, { cutMarks: false });
+    svg = `<svg viewBox="0 0 ${page.width} ${page.height}" preserveAspectRatio="xMidYMid meet"><defs>${defs}</defs>${body}</svg>`;
+  } catch { /* aperçu indisponible */ }
+  let p = document.querySelector<HTMLElement>("#tab-peek");
+  if (!p) { p = document.createElement("div"); p.id = "tab-peek"; document.body.appendChild(p); }
+  p.innerHTML = `<div class="tp-thumb">${svg}</div><div class="tp-info"><b>${esc(doc.name)}</b>
+    <span>${doc.pages.length} feuille(s) · ${esc(page.name)}${active ? " · document affiché" : ""}</span>
+    ${store.isDirty(i) ? `<span class="tp-dirty">● modifications non enregistrées</span>` : ""}</div>`;
+  const r = tab.getBoundingClientRect();
+  p.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 268))}px`;
+  p.style.top = `${r.bottom + 6}px`;
+}
+
+/** Liste de tous les documents ouverts (utile quand les onglets sont nombreux). */
+function tabList(anchor: HTMLElement) {
+  document.querySelector(".pop-menu")?.remove();
+  const m = document.createElement("div");
+  m.className = "pop-menu menu-body tab-menu";
+  m.innerHTML = store.tabs.map((t, i) => {
+    const d = i === store.activeTab ? store.doc : t.doc;
+    return `<button data-i="${i}" class="${i === store.activeTab ? "on" : ""}"><span class="ti">${tabIcon(d)}</span><span class="nm">${esc(shortName(d.name))}<small>${esc(d.name)} · ${d.pages.length} feuille(s)${store.isDirty(i) ? " · ● modifié" : ""}</small></span><span class="x" data-x="${i}" title="Fermer">×</span></button>`;
+  }).join("");
+  const r = anchor.getBoundingClientRect();
+  document.body.appendChild(m);
+  m.style.top = `${r.bottom + 4}px`;
+  m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - m.offsetWidth - 8))}px`;
+  const close = () => { m.remove(); document.removeEventListener("mousedown", off); };
+  const off = (e: MouseEvent) => { if (!m.contains(e.target as Node) && e.target !== anchor) close(); };
+  setTimeout(() => document.addEventListener("mousedown", off), 0);
+  m.onclick = (e) => {
+    const t = e.target as HTMLElement;
+    const x = t.closest<HTMLElement>("[data-x]");
+    const b = t.closest<HTMLElement>("[data-i]");
+    close();
+    if (x) closeTabAsk(+x.dataset.x!);
+    else if (b) { closeTextEditor(); store.switchTab(+b.dataset.i!); }
+  };
+}
+
 function buildTopbar() {
   document.querySelectorAll<HTMLElement>("[data-act]").forEach((b) => {
     b.onclick = () => { b.closest("details")?.removeAttribute("open"); ACTIONS[b.dataset.act!]?.(); };
@@ -296,19 +369,23 @@ function buildTopbar() {
   const tabs = () => {
     document.title = `${store.doc.name} — FicheStudio`;
     const el = $("#tabs");
-    el.innerHTML = store.tabs.map((t, i) => {
-      const name = (i === store.activeTab ? store.doc : t.doc).name.replace(/</g, "&lt;");
-      return `<div class="tab ${i === store.activeTab ? "on" : ""}" data-i="${i}" title="${name}"><span class="nm">${name}</span>${store.isDirty(i) ? `<span class="dot" title="Modifié depuis le dernier enregistrement">●</span>` : ""}<button data-x="${i}" title="Fermer">×</button></div>`;
-    }).join("") + `<button class="tab-new" title="Nouveau document (onglet)">＋</button>`;
+    el.innerHTML = `<div class="tabs-row">${store.tabs.map((t, i) => {
+      const d = i === store.activeTab ? store.doc : t.doc;
+      return `<div class="tab ${i === store.activeTab ? "on" : ""}" data-i="${i}" aria-label="${esc(d.name)}"><span class="ti">${tabIcon(d)}</span><span class="nm">${esc(shortName(d.name))}</span>${store.isDirty(i) ? `<span class="dot" title="Modifié depuis le dernier enregistrement">●</span>` : ""}<button data-x="${i}" title="Fermer (clic du milieu)">×</button></div>`;
+    }).join("")}</div><button class="tab-list" title="Tous les documents ouverts">▾ ${store.tabs.length}</button><button class="tab-new" title="Nouveau document (onglet)">＋</button>`;
+    el.querySelectorAll<HTMLElement>(".tab").forEach((t) => {
+      t.onmouseenter = () => peekSoon(t, +t.dataset.i!);
+      t.onmouseleave = () => peekHide();
+      t.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeTabAsk(+t.dataset.i!); } };
+    });
+    el.querySelector<HTMLElement>(".tab-list")!.onclick = (e) => tabList(e.currentTarget as HTMLElement);
+    el.querySelector<HTMLElement>(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     el.querySelectorAll<HTMLElement>(".tab").forEach((t) => (t.onclick = (e) => {
       const x = (e.target as HTMLElement).dataset.x;
       closeTextEditor();
-      if (x !== undefined) {
-        const i = +x;
-        const name = store.tabs[i]?.doc.name ?? "";
-        if (store.isDirty(i) && !confirm(`Fermer « ${name} » ? Les modifications non enregistrées (fichier .fstudio) seront perdues.`)) return;
-        store.closeTab(i);
-      } else store.switchTab(+t.dataset.i!);
+      peekHide();
+      if (x !== undefined) closeTabAsk(+x);
+      else store.switchTab(+t.dataset.i!);
     }));
     el.querySelector<HTMLElement>(".tab-new")!.onclick = () => ACTIONS.new();
   };

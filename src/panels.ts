@@ -3,7 +3,7 @@ import { store } from "./store";
 import { selectionBoxes, render as renderCanvas, zoomToFit, frameNode, nodeBox as nodeBoxOf, currentIsolation, enterIsolation, exitIsolation, isIsolated } from "./canvas";
 import {
   DEFAULT_LEVEL_COLORS, newGroup, newLayer, newPage, uid, walk, NONE, solid, sectionRects, masterAreas, nextSheetName, SHEET_KINDS, type SheetKind,
-  type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page, type GroupNode,
+  BLEND_MODES, type BlendMode, type Paint, type Paragraph, type Run, type SceneNode, type ShapeNode, type TextNode, type Page, type GroupNode,
 } from "./model";
 import { mul, rotateAt, rotationOf, scaleAt, translate, boxOfPoints, type Box } from "./geom";
 import {
@@ -19,6 +19,7 @@ import { variantOf, PREFS, palette, TEXT_STYLES, applyTextStyle } from "./charte
 import { builtinItems, deleteItem, instantiate, saveItem, userItems, assetsOf, type LibItem } from "./library";
 import { embedAsset, relinkImage, canLinkFiles } from "./assets";
 import { imageManager } from "./imagemanager";
+import { booleanOp, BOOL_OPS, type BoolOp } from "./boolean";
 import { viewCenter } from "./canvas";
 import { layerPagesDialog, layerKind } from "./layerpages";
 import { inv } from "./geom";
@@ -533,8 +534,9 @@ function unionBox(boxes: Box[]): Box | null {
   return boxOfPoints(boxes.flatMap((b) => [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y + b.h }]));
 }
 
-const field = (label: string, key: string, value: string, attrs = "") =>
-  `<label class="fld"><span>${label}</span><input data-k="${key}" value="${esc(value)}" ${attrs}></label>`;
+/** Champ du panneau : libellé au-dessus, unité affichée dans le champ, à droite. */
+const field = (label: string, key: string, value: string, unit = "") =>
+  `<label class="fld"><span>${label}</span><span class="inp${unit ? " has-unit" : ""}"><input data-k="${key}" value="${esc(value)}" inputmode="decimal">${unit ? `<i>${unit}</i>` : ""}</span></label>`;
 
 function paintEditor(prefix: string, p: Paint, allowNone = true) {
   const type = p.type;
@@ -577,7 +579,7 @@ function refreshProps() {
   const el = $("#props");
   const nodes = store.selected();
   const editing = isEditingText();
-  if (!nodes.length) { el.innerHTML = docProps(); bindDocProps(el); if (!store.editingMaster) tableTool(el, true); return; }
+  if (!nodes.length) { el.innerHTML = docProps(); upgradeSections(el); bindSections(el); bindDocProps(el); if (!store.editingMaster) tableTool(el, true); return; }
   const boxes = [...selectionBoxes().values()];
   const b = unionBox(boxes) ?? { x: 0, y: 0, w: 0, h: 0 };
   const one = nodes.length === 1 ? nodes[0] : null;
@@ -585,72 +587,152 @@ function refreshProps() {
   const texts = nodes.filter((n) => n.type === "text") as TextNode[];
   const rot = one ? (rotationOf(mul(store.parentCumulative(one.id), one.transform)) * 180) / Math.PI : 0;
   const parts: string[] = [];
-  parts.push(`<section><h4>${one ? esc(one.name || one.type) : `${nodes.length} objets`}</h4>
-    <div class="grid2">${field("X (mm)", "x", n1(toMm(b.x)))}${field("Y (mm)", "y", n1(toMm(b.y)))}
-    ${field("L (mm)", "w", n1(toMm(b.w)))}${field("H (mm)", "h", n1(toMm(b.h)))}
-    ${one ? field("Rotation (°)", "rot", n1(rot)) : ""}${field("Opacité (%)", "op", String(Math.round((one?.opacity ?? 1) * 100)))}</div>
-    <label class="chk" title="En présentation, l'objet est masqué au départ puis révélé pas à pas (→ ou Espace)"><input type="checkbox" data-k="step" ${nodes.every((n) => n.step) ? "checked" : ""}> Étape de correction (présentation)</label>
-    ${one ? `<div class="comp-line"><span>Compétences</span>${one.comp?.length ? one.comp.map((c) => `<span class="code" style="background:${themeColor(c)}">${c}</span>`).join("") : `<small>aucune</small>`}<button data-act="comp">Choisir…</button></div>` : ""}</section>`);
+  // en-tête : ce qui est sélectionné
+  const kindLabel: Record<string, string> = { shape: "Forme", path: "Courbe", text: "Texte", image: "Image", group: "Groupe" };
+  const kinds = [...new Set(nodes.map((n) => (n.type === "group" && n.isLayer ? "Calque" : kindLabel[n.type])))];
+  parts.push(`<div class="sel-head"><span class="sel-kind">${kinds.join(" · ")}</span><b>${one ? esc(one.name || kindLabel[one.type]) : `${nodes.length} objets`}</b></div>`);
+  parts.push(psec("geo", "Position et taille", `<div class="grid2">${field("X", "x", n1(toMm(b.x)), "mm")}${field("Y", "y", n1(toMm(b.y)), "mm")}
+    ${field("Largeur", "w", n1(toMm(b.w)), "mm")}${field("Hauteur", "h", n1(toMm(b.h)), "mm")}
+    ${one ? field("Rotation", "rot", n1(rot), "°") : ""}</div>`));
+  parts.push(psec("look", "Apparence", `<div class="grid2">${field("Opacité", "op", String(Math.round((one?.opacity ?? 1) * 100)), "%")}
+    <label class="fld" title="Comment l'objet se mélange avec ce qui est dessous"><span>Mode de fusion</span><select data-k="blend">${BLEND_MODES.map((m) => `<option value="${m.id}" ${(nodes.every((n) => (n.blend ?? "normal") === m.id)) ? "selected" : ""}>${m.label}</option>`).join("")}${new Set(nodes.map((n) => n.blend ?? "normal")).size > 1 ? `<option value="" selected disabled>(mixte)</option>` : ""}</select></label></div>`));
   if (vec.length) {
     const v = vec[0];
     const dashKind = !v.stroke.dash ? "solid" : v.stroke.dash[0] < 0.5 ? "dot" : "dash";
-    parts.push(`<section><h4>Remplissage</h4>${paintEditor("fill", v.fill)}${swatches("fill")}
-      <label class="chk"><input type="checkbox" data-k="bindfill" ${v.bind?.fill === "couleur_niveau" ? "checked" : ""}> Couleur du niveau de classe (pastille)</label></section>
-      <section><h4>Contour</h4>${paintEditor("stroke", v.stroke.paint)}${swatches("stroke")}
-      <div class="grid2">${field("Épaisseur (pt)", "sw", n1(toPt(v.stroke.width)))}
+    parts.push(psec("fill", "Remplissage", `${paintEditor("fill", v.fill)}${swatches("fill")}
+      <label class="chk"><input type="checkbox" data-k="bindfill" ${v.bind?.fill === "couleur_niveau" ? "checked" : ""}> Couleur du niveau de classe (pastille)</label>`));
+    parts.push(psec("stroke", "Contour", `${paintEditor("stroke", v.stroke.paint)}${swatches("stroke")}
+      <div class="grid2">${field("Épaisseur", "sw", n1(toPt(v.stroke.width)), "pt")}
       <label class="fld"><span>Style</span><select data-k="dash">
         <option value="solid" ${dashKind === "solid" ? "selected" : ""}>Plein</option>
         <option value="dash" ${dashKind === "dash" ? "selected" : ""}>Tirets</option>
-        <option value="dot" ${dashKind === "dot" ? "selected" : ""}>Pointillés</option></select></label></div></section>`);
+        <option value="dot" ${dashKind === "dot" ? "selected" : ""}>Pointillés</option></select></label></div>`));
     if (one?.type === "shape") {
-      parts.push(`<section><h4>Forme</h4><div class="grid2">
+      parts.push(psec("shape", "Forme", `<div class="grid2">
         <label class="fld"><span>Type</span><select data-k="kind">${(["rect", "ellipse", "triangle", "diamond", "arrow"] as const).map((k) => `<option value="${k}" ${one.kind === k ? "selected" : ""}>${{ rect: "Rectangle", ellipse: "Ellipse", triangle: "Triangle", diamond: "Losange", arrow: "Flèche" }[k]}</option>`).join("")}</select></label>
-        ${one.kind === "rect" ? field("Coins (mm)", "radius", n1(toMm(one.radius[0]))) : ""}</div>
-        <button data-act="curves">Convertir en courbes</button></section>`);
+        ${one.kind === "rect" ? field("Coins", "radius", n1(toMm(one.radius[0])), "mm") : ""}</div>
+        <div class="btnrow"><button data-act="curves">Convertir en courbes</button></div>`));
     }
+  }
+  // opérations booléennes : au moins deux objets vectoriels (ou un seul pour diviser)
+  const vecCount = nodes.reduce((k, n) => k + (n.type === "shape" || n.type === "path" ? 1 : n.type === "group" ? (() => { let c = 0; walk(n.children, (x) => { if (x.type === "shape" || x.type === "path") c++; }); return c; })() : 0), 0);
+  if (vecCount >= 1) {
+    parts.push(psec("bool", "Opérations booléennes", `<div class="bool-row">${BOOL_OPS.map((o) => `<button data-bool="${o.op}" title="${o.label} — ${o.hint}" ${vecCount < 2 && o.op !== "divide" ? "disabled" : ""}>${BOOL_ICON[o.op]}<span>${o.label}</span></button>`).join("")}</div>
+      <p class="hint">${vecCount < 2 ? "Sélectionnez au moins deux formes (Maj+clic) ; « Diviser » sépare aussi les parties d'une forme." : "Le résultat prend le style de l'objet du dessous. ⌘Z annule."}</p>`));
   }
   if (one?.type === "image") {
     const a = store.doc.assets[one.asset];
     const src = !a ? "?" : a.data ? "intégrée au document" : a.link?.kind === "url" ? `liée : ${a.link.url}` : `liée : ${a.link?.path ?? a.name}`;
-    parts.push(`<section><h4>Image</h4><p class="hint">${esc(a?.name ?? "")} — ${esc(src)}</p>
+    parts.push(psec("image", "Image", `<p class="hint">${esc(a?.name ?? "")} — ${esc(src)}</p>
       <div class="btnrow wrap">${a && !a.data ? `<button data-act="img-embed" title="Copier l'image dans le document">Intégrer</button>` : ""}
       ${canLinkFiles() ? `<button data-act="img-relink" title="Choisir le fichier lié (copie ou nouvel emplacement)">Relier…</button>` : ""}
       <button data-act="img-manager" title="Toutes les images du document : introuvables, relocaliser dans un dossier…">Images…</button>
-      <button data-act="img-size" title="Revenir aux proportions d'origine">Proportions d'origine</button></div></section>`);
+      <button data-act="img-size" title="Revenir aux proportions d'origine">Proportions d'origine</button></div>`));
   }
   if (texts.length || editing) {
     const r = texts.length ? firstRun(texts[0]) : null;
     const p = texts[0]?.paragraphs[0];
-    parts.push(`<section class="keep-editor"><h4>Texte${editing ? " — sélection" : ""}</h4>
+    parts.push(psec("text", `Texte${editing ? " — sélection" : ""}`, `
       <label class="fld wide"><span>Style de la charte</span><select data-k="tstyle"><option value="">—</option>${TEXT_STYLES.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join("")}</select></label>
       <label class="fld wide"><span>Police</span><input list="fontlist" data-k="font" value="${esc(r?.font ?? "Arial")}"></label>
       <datalist id="fontlist">${FONTS.map((f) => `<option value="${f}">`).join("")}</datalist>
-      <div class="grid2">${field("Corps (pt)", "fsize", n1(toPt(r?.size ?? 50)))}<label class="fld"><span>Couleur</span><input type="color" data-k="fcolor" value="${r?.color ?? "#000000"}"></label>
-      </div>${swatches("fcolor")}<div class="grid2">
-      ${field("Interligne (×)", "lh", String(Math.round((p?.lineHeight ?? 1) * 100) / 100))}
-      <label class="fld"><span>Titre numéroté</span><select data-k="level">${[0, 1, 2, 3].map((l) => `<option value="${l}" ${(p?.level ?? 0) === l ? "selected" : ""}>${l ? `Niveau ${l}` : "Texte courant"}</option>`).join("")}</select></label>
-      ${field("Espace avant (pt)", "sb", n1(toPt(p?.spaceBefore ?? 0)))}${field("Espace après (pt)", "sa", n1(toPt(p?.spaceAfter ?? 0)))}
-      ${field("Retrait gauche (mm)", "li", n1(toMm(p?.leftIndent ?? 0)))}${field("Retrait 1re ligne (mm)", "fi", n1(toMm(p?.firstIndent ?? 0)))}</div>
+      <div class="grid2">${field("Corps", "fsize", n1(toPt(r?.size ?? 50)), "pt")}<label class="fld"><span>Couleur</span><input type="color" data-k="fcolor" value="${r?.color ?? "#000000"}"></label></div>
+      ${swatches("fcolor")}
       <div class="btnrow">
         <button data-act="bold" class="${r && r.weight >= 600 ? "on" : ""}" title="Gras"><b>G</b></button>
         <button data-act="italic" class="${r?.italic ? "on" : ""}" title="Italique"><i>I</i></button>
         <button data-act="underline" class="${r?.underline ? "on" : ""}" title="Souligné"><u>S</u></button>
         <span class="sep"></span>
-        ${(["left", "center", "right", "justify"] as const).map((a) => `<button data-act="al-${a}" class="${p?.align === a ? "on" : ""}" title="${{ left: "Gauche", center: "Centré", right: "Droite", justify: "Justifié" }[a]}">${{ left: "⇤", center: "↔", right: "⇥", justify: "☰" }[a]}</button>`).join("")}
-      </div></section>`);
+        ${(["left", "center", "right", "justify"] as const).map((a) => `<button data-act="al-${a}" class="ico-btn ${p?.align === a ? "on" : ""}" title="${{ left: "Aligné à gauche", center: "Centré", right: "Aligné à droite", justify: "Justifié" }[a]}">${TEXT_ALIGN_ICON[a]}</button>`).join("")}
+      </div>
+      <h5>Paragraphe</h5>
+      <div class="grid2">
+      ${field("Interligne", "lh", String(Math.round((p?.lineHeight ?? 1) * 100) / 100), "×")}
+      <label class="fld"><span>Titre numéroté</span><select data-k="level">${[0, 1, 2, 3].map((l) => `<option value="${l}" ${(p?.level ?? 0) === l ? "selected" : ""}>${l ? `Niveau ${l}` : "Texte courant"}</option>`).join("")}</select></label>
+      ${field("Espace avant", "sb", n1(toPt(p?.spaceBefore ?? 0)), "pt")}${field("Espace après", "sa", n1(toPt(p?.spaceAfter ?? 0)), "pt")}
+      ${field("Retrait gauche", "li", n1(toMm(p?.leftIndent ?? 0)), "mm")}${field("Retrait 1re ligne", "fi", n1(toMm(p?.firstIndent ?? 0)), "mm")}</div>`, "keep-editor"));
   }
-  parts.push(`<section><h4>Disposition</h4>
-    <div class="btnrow">${(["l", "c", "r", "t", "m", "b"] as const).map((m) => `<button data-align="${m}" title="${{ l: "Aligner à gauche", c: "Centrer horizontalement", r: "Aligner à droite", t: "Aligner en haut", m: "Centrer verticalement", b: "Aligner en bas" }[m]}">${{ l: "⫷", c: "⫼", r: "⫸", t: "⊤", m: "⊝", b: "⊥" }[m]}</button>`).join("")}</div>
-    <div class="btnrow"><button data-act="dist-h" title="Répartir horizontalement">⇹</button><button data-act="dist-v" title="Répartir verticalement">⇳</button>
-      <span class="sep"></span><button data-act="front" title="Premier plan">⤒</button><button data-act="up" title="Avancer">↑</button><button data-act="down" title="Reculer">↓</button><button data-act="back" title="Arrière-plan">⤓</button></div>
+  parts.push(psec("arrange", "Disposition", `
+    <div class="ico-grid">${(["l", "c", "r", "t", "m", "b"] as const).map((m) => `<button data-align="${m}" class="ico-btn" title="${{ l: "Aligner à gauche", c: "Centrer horizontalement", r: "Aligner à droite", t: "Aligner en haut", m: "Centrer verticalement", b: "Aligner en bas" }[m]}">${ALIGN_ICON[m]}</button>`).join("")}
+      <button data-act="dist-h" class="ico-btn" title="Répartir horizontalement">${ARRANGE_ICON.disth}</button><button data-act="dist-v" class="ico-btn" title="Répartir verticalement">${ARRANGE_ICON.distv}</button></div>
+    <div class="ico-grid">${(["front", "up", "down", "back"] as const).map((a) => `<button data-act="${a}" class="ico-btn" title="${{ front: "Premier plan", up: "Avancer", down: "Reculer", back: "Arrière-plan" }[a]}">${ARRANGE_ICON[a]}</button>`).join("")}</div>
+    <p class="hint">${nodes.length === 1 ? "Un seul objet : alignement sur la page." : "Plusieurs objets : alignement sur la sélection."}</p>
     <div class="btnrow wrap"><button data-act="group">Grouper</button><button data-act="ungroup">Dissocier</button><button data-act="mask" title="La forme du dessus découpe les autres">Masquer</button>
       <button data-act="dup">Dupliquer</button><button data-act="del">Supprimer</button>
-      <button data-act="isolate" title="Travailler sur la sélection seule, puis revenir à la vue complète au même endroit (I)">${isIsolated() ? "◎ Quitter la vue isolée" : "◎ Isoler"}</button></div>
-    <p class="hint">${nodes.length === 1 ? "Un seul objet : alignement sur la page." : "Plusieurs objets : alignement sur la sélection."}</p></section>`);
+      <button data-act="isolate" title="Travailler sur la sélection seule, puis revenir à la vue complète au même endroit (I)">${isIsolated() ? "◎ Quitter la vue isolée" : "◎ Isoler"}</button></div>`));
+  parts.push(psec("present", "Présentation et compétences", `
+    <label class="chk" title="En présentation, l'objet est masqué au départ puis révélé pas à pas (→ ou Espace)"><input type="checkbox" data-k="step" ${nodes.every((n) => n.step) ? "checked" : ""}> Étape de correction (révélée pas à pas)</label>
+    ${one ? `<div class="comp-line"><span>Compétences</span>${one.comp?.length ? one.comp.map((c) => `<span class="code" style="background:${themeColor(c)}">${c}</span>`).join("") : `<small>aucune</small>`}<button data-act="comp">Choisir…</button></div>` : ""}`));
   el.innerHTML = parts.join("");
   bindProps(el, nodes, b);
+  bindSections(el);
+  el.querySelectorAll<HTMLButtonElement>("[data-bool]").forEach((btn) => (btn.onclick = async () => {
+    const st = document.querySelector("#status");
+    try { const msg = await booleanOp(btn.dataset.bool as BoolOp); if (st) st.textContent = msg; }
+    catch (e) { console.error(e); if (st) st.textContent = `Opération impossible : ${(e as Error).message}`; }
+  }));
   tableTool(el, false);
 }
+
+// ------------------------------------------------------------------ sections repliables du panneau
+
+// état retenu : sections fermées (ouvertes par défaut) et sections ouvertes (fermées par défaut)
+const secSet = (key: string): Set<string> => { try { return new Set(JSON.parse(localStorage.getItem(key) ?? "[]")); } catch { return new Set(); } };
+const CLOSED = "fichestudio.closedSections", OPENED = "fichestudio.openedSections";
+/** Section repliable ; son état (ouverte ou fermée) est retenu d'une sélection à l'autre. */
+function psec(key: string, title: string, body: string, cls = "", openByDefault = true) {
+  const open = openByDefault ? !secSet(CLOSED).has(key) : secSet(OPENED).has(key);
+  return `<details class="psec ${cls}" data-sec="${key}" data-def="${openByDefault ? 1 : 0}" ${open ? "open" : ""}><summary>${title}</summary><div class="psec-body">${body}</div></details>`;
+}
+/** Sections simples (h4 + contenu) du panneau → sections repliables, clé tirée du titre. */
+function upgradeSections(el: HTMLElement) {
+  const folded = new Set(["raccourcis", "variables"]); // aide de référence : repliée par défaut
+  el.querySelectorAll<HTMLElement>(":scope > section").forEach((sec) => {
+    const h = sec.querySelector(":scope > h4");
+    if (!h) return;
+    const key = (h.textContent ?? "").toLowerCase().replace(/«.*»/, "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]+/g, " ").trim().split(" ")[0] || "sec";
+    const host = document.createElement("div");
+    host.innerHTML = psec(`doc-${key}`, h.innerHTML, "", sec.className, !folded.has(key));
+    const d = host.firstElementChild as HTMLElement, body = d.querySelector(".psec-body")!;
+    h.remove();
+    while (sec.firstChild) body.appendChild(sec.firstChild);
+    sec.replaceWith(d);
+  });
+}
+
+function bindSections(el: HTMLElement) {
+  el.querySelectorAll<HTMLDetailsElement>("details.psec:not([data-bound])").forEach((d) => {
+    d.dataset.bound = "1";
+    d.addEventListener("toggle", () => {
+      const store_ = d.dataset.def === "1" ? CLOSED : OPENED, set = secSet(store_);
+      const mark = d.dataset.def === "1" ? !d.open : d.open;
+      if (mark) set.add(d.dataset.sec!); else set.delete(d.dataset.sec!);
+      try { localStorage.setItem(store_, JSON.stringify([...set])); } catch { /* préférence non gardée */ }
+    });
+  });
+}
+
+// icônes du panneau (traits 1,5 px, couleur du texte)
+const ico = (d: string, fill = "") => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/>${fill ? `<path class="f" d="${fill}"/>` : ""}</svg>`;
+const ALIGN_ICON: Record<"l" | "c" | "r" | "t" | "m" | "b", string> = {
+  l: ico("M4 3v18", "M7 6h11v4H7z M7 14h7v4H7z"), c: ico("M12 3v18", "M6 6h12v4H6z M8 14h8v4H8z"), r: ico("M20 3v18", "M6 6h11v4H6z M10 14h7v4h-7z"),
+  t: ico("M3 4h18", "M6 7h4v11H6z M14 7h4v7h-4z"), m: ico("M3 12h18", "M6 6h4v12H6z M14 8h4v8h-4z"), b: ico("M3 20h18", "M6 6h4v11H6z M14 10h4v7h-4z"),
+};
+const ARRANGE_ICON = {
+  disth: ico("M4 4v16 M20 4v16", "M9 8h6v8H9z"), distv: ico("M4 4h16 M4 20h16", "M8 9h8v6H8z"),
+  front: ico("M4 4h11v11H4z", "M9 9h11v11H9z"), up: ico("M12 19V7 M7 11l5-5 5 5"), down: ico("M12 5v12 M7 13l5 5 5-5"), back: ico("M9 9h11v11H9z", "M4 4h11v11H4z"),
+};
+const TEXT_ALIGN_ICON = {
+  left: ico("M4 6h16 M4 10h10 M4 14h16 M4 18h10"), center: ico("M4 6h16 M7 10h10 M4 14h16 M7 18h10"),
+  right: ico("M4 6h16 M10 10h10 M4 14h16 M10 18h10"), justify: ico("M4 6h16 M4 10h16 M4 14h16 M4 18h16"),
+};
+const BOOL_ICON: Record<BoolOp, string> = {
+  unite: ico("", "M3 3h11v5h7v13H8v-6H3z"),
+  subtract: ico("M8 8h13v13H8z", "M3 3h11v5H8v7H3z"),
+  intersect: ico("M3 3h11v11H3z M8 8h13v13H8z", "M8 8h6v6H8z"),
+  exclude: ico("", "M3 3h11v5H8v6H3z M14 14v-6h7v13H8v-7z"),
+  divide: ico("M3 3h11v11H3z M8 8h13v13H8z M8 8h6v6H8z"),
+};
 
 // ------------------------------------------------------------------ tableau
 
@@ -820,16 +902,18 @@ export function tablePicker(anchor: HTMLElement) {
 /** Section « Tableau » du panneau Propriétés : insère un tableau à la charte. */
 function tableTool(el: HTMLElement, top: boolean) {
   const o = tableOpts;
-  const sec = document.createElement("section");
-  sec.className = "table-tool";
-  sec.innerHTML = `<h4>Tableau</h4>
-    <div class="grid2">${field("Rangées", "rows", String(o.rows))}${field("Colonnes", "cols", String(o.cols))}
-    ${field("Largeur (mm)", "widthMm", n1(o.widthMm))}${field("Hauteur des cases (mm)", "cellHmm", n1(o.cellHmm))}</div>
+  const body = `<div class="grid2">${field("Rangées", "rows", String(o.rows))}${field("Colonnes", "cols", String(o.cols))}
+    ${field("Largeur", "widthMm", n1(o.widthMm), "mm")}${field("Hauteur des cases", "cellHmm", n1(o.cellHmm), "mm")}</div>
     <label class="chk"><input type="checkbox" data-t="header" ${o.header ? "checked" : ""}> Rangée de titre</label>
     <label class="chk"><input type="checkbox" data-t="headerCol" ${o.headerCol ? "checked" : ""}> Colonne de titre</label>
     <button class="primary" data-t="add">＋ Ajouter le tableau</button>
     <p class="hint">Calques : un dossier « Tableau », une rangée par groupe, chaque case = rectangle + texte. En-têtes bleu clair, contours bleus (charte).</p>`;
+  // sans sélection : outil en tête du panneau ; avec une sélection : section repliée par défaut
+  const host = document.createElement("div");
+  host.innerHTML = psec("table", "Nouveau tableau", body, "table-tool", top);
+  const sec = host.firstElementChild as HTMLElement;
   if (top) el.prepend(sec); else el.append(sec);
+  bindSections(el);
   // les champs de saisie réutilisent field() : on les relit par leur data-k, sans passer par bindProps
   sec.querySelectorAll<HTMLInputElement>("[data-k]").forEach((inp) => {
     inp.onchange = () => {
@@ -907,6 +991,8 @@ function bindProps(el: HTMLElement, nodes: SceneNode[], b: Box) {
         store.commit(() => transformNode(n, rotateAt(((num - cur) * Math.PI) / 180, c), store.parentCumulative(n.id), false));
       } else if (k === "step") {
         store.commit(() => { for (const n of nodes) n.step = (inp as HTMLInputElement).checked || undefined; });
+      } else if (k === "blend" && v) {
+        store.commit(() => { for (const n of nodes) { if (v === "normal") delete n.blend; else n.blend = v as BlendMode; } });
       } else if (k === "op" && !isNaN(num)) {
         store.commit(() => { for (const n of nodes) n.opacity = Math.max(0, Math.min(1, num / 100)); });
       } else if (k.startsWith("fill.")) applyToVectors((n) => { n.fill = setPaint(n.fill, k.slice(5), v); });

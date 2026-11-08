@@ -10,8 +10,8 @@ import {
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { zipSync } from "fflate";
-import type { Doc, Mat, Paint, Paragraph, Run, SceneNode, SubPath } from "../model";
-import { masterAreas, sectionRects } from "../model";
+import type { BlendMode, Doc, Mat, Paint, Paragraph, Run, SceneNode, SubPath } from "../model";
+import { BLEND_MODES, masterAreas, sectionRects } from "../model";
 import { apply, shapeToSubpaths } from "../geom";
 import { layoutText } from "../textlayout";
 import { boundColor, computeNumbering, fileName, prepareText, varsFor } from "../templates";
@@ -189,6 +189,18 @@ class Painter {
     this.ops.push(setGraphicsState(n));
   }
 
+  /** Mode de fusion (BM) : s'applique à tout ce qui est dessiné ensuite dans cet état graphique. */
+  private blend(mode: BlendMode) {
+    const k = `bm:${mode}`;
+    let n = this.gs.get(k);
+    if (!n) {
+      const ref = this.pdf.context.register(this.pdf.context.obj({ Type: "ExtGState", BM: PDFName.of(BLEND_MODES.find((b) => b.id === mode)?.pdf ?? "Normal") }));
+      n = this.page.node.newExtGState("GS", ref);
+      this.gs.set(k, n);
+    }
+    this.ops.push(setGraphicsState(n));
+  }
+
   private path(sps: SubPath[], m?: Mat) {
     const P = (p: { x: number; y: number }) => (m ? apply(m, p) : p);
     for (const sp of sps) {
@@ -298,6 +310,7 @@ class Painter {
     this.ops.push(pushGraphicsState());
     const [a, b, c, d, e, f] = n.transform;
     this.ops.push(concatTransformationMatrix(a, b, c, d, e, f));
+    if (n.blend && n.blend !== "normal") this.blend(n.blend);
     if (n.type === "shape" || n.type === "path") this.vector(n, op);
     else if (n.type === "image") await this.image(n, op);
     else if (n.type === "text") await this.text(n, op);

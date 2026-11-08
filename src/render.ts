@@ -95,7 +95,13 @@ function text(c: Ctx, n: TextNode, editable: boolean): string {
   return `<g ${attrs(c, n, editable)}>${hit}${out.join("")}</g>`;
 }
 
+/** Mode de fusion : l'élément est enveloppé dans un groupe CSS mix-blend-mode (un chemin a déjà son style). */
 function renderNode(c: Ctx, n: SceneNode, editable = true): string {
+  const out = renderBare(c, n, editable);
+  return n.blend && n.blend !== "normal" && out ? `<g style="mix-blend-mode:${n.blend}">${out}</g>` : out;
+}
+
+function renderBare(c: Ctx, n: SceneNode, editable = true): string {
   const iso = c.opts.isolate;
   // compétence isolée : seuls les calques qui la contiennent sont rendus, même s'ils sont masqués
   if (iso && !iso.has(n.id)) return "";

@@ -32,6 +32,16 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
 - **Dessin vectoriel** : rectangle (coins arrondis), ellipse, triangle, losange, flèche,
   ligne, plume de Bézier, édition des nœuds (A ; Alt-clic = point lisse/anguleux,
   Suppr = retirer un nœud), conversion en courbes, masques, groupes.
+- **Opérations booléennes** (panneau de droite, plusieurs formes ou courbes sélectionnées) : Union,
+  Soustraire (les objets du dessus retirés de celui du dessous), Intersection, Exclure, Diviser
+  (un morceau par zone). Les courbes de Bézier sont conservées (paper.js, chargé à la demande) ; le
+  résultat prend le style de l'objet du dessous ; ⌘Z annule.
+- **Panneau de droite** : sections repliables (état retenu), en-tête de la sélection, unités dans les
+  champs, icônes d'alignement, de répartition et de plans ; exports en barre compacte repliable.
+- **Modes de fusion** (panneau de droite, sous l'opacité) pour tout objet, groupe ou calque :
+  Normal, Produit, Superposition (écran), Incrustation, Obscurcir, Éclaircir, Densité couleur −/+,
+  Lumière crue/tamisée, Différence, Exclusion, Teinte, Saturation, Couleur, Luminosité ;
+  repris à l'affichage, en présentation, dans les PDF et le script Affinity, et lus dans les .af.
 - **Modèles et série** : variables `{{prénom}}` dans les textes + import CSV
   (UTF-8 ou export Excel) → aperçu ligne par ligne et PDF de toute la série.
 - **Feuilles et gabarits** : une feuille peut être pleine ou découpée en 2 ou 3 parties

@@ -24,6 +24,28 @@ export interface Stroke {
 /** Pointe de flèche (styles Affinity) ; taille proportionnelle à l'épaisseur du trait. */
 export interface ArrowHead { style: "barbed" | "triangle"; sx: number; sy: number }
 
+/** Modes de fusion (noms CSS) ; équivalents PDF et Affinity (nom dans BlendMode du SDK). */
+export type BlendMode = "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "color-dodge" | "color-burn"
+  | "hard-light" | "soft-light" | "difference" | "exclusion" | "hue" | "saturation" | "color" | "luminosity";
+export const BLEND_MODES: { id: BlendMode; label: string; pdf: string; af: string }[] = [
+  { id: "normal", label: "Normal", pdf: "Normal", af: "Normal" },
+  { id: "multiply", label: "Produit", pdf: "Multiply", af: "Multiply" },
+  { id: "screen", label: "Superposition (écran)", pdf: "Screen", af: "Screen" },
+  { id: "overlay", label: "Incrustation", pdf: "Overlay", af: "Overlay" },
+  { id: "darken", label: "Obscurcir", pdf: "Darken", af: "Darken" },
+  { id: "lighten", label: "Éclaircir", pdf: "Lighten", af: "Lighten" },
+  { id: "color-dodge", label: "Densité couleur −", pdf: "ColorDodge", af: "ColourDodge" },
+  { id: "color-burn", label: "Densité couleur +", pdf: "ColorBurn", af: "ColourBurn" },
+  { id: "hard-light", label: "Lumière crue", pdf: "HardLight", af: "HardLight" },
+  { id: "soft-light", label: "Lumière tamisée", pdf: "SoftLight", af: "SoftLight" },
+  { id: "difference", label: "Différence", pdf: "Difference", af: "Difference" },
+  { id: "exclusion", label: "Exclusion", pdf: "Exclusion", af: "Exclusion" },
+  { id: "hue", label: "Teinte", pdf: "Hue", af: "Hue" },
+  { id: "saturation", label: "Saturation", pdf: "Saturation", af: "Saturation" },
+  { id: "color", label: "Couleur", pdf: "Color", af: "Colour" },
+  { id: "luminosity", label: "Luminosité", pdf: "Luminosity", af: "Luminosity" },
+];
+
 interface Base {
   id: string;
   name: string;
@@ -34,6 +56,7 @@ interface Base {
   tag?: string | null;   // couleur d'étiquette (calques, groupes)
   step?: boolean;        // étape de correction : révélée pas à pas en présentation
   comp?: string[];       // compétences travaillées (codes du BO : T1C11…), calques et groupes
+  blend?: BlendMode;     // mode de fusion avec ce qui est dessous (absent = normal)
 }
 
 export interface Vec { x: number; y: number }

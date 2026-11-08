@@ -2,7 +2,7 @@
 import { AfArchive, KsStream, type KsObj, type KsValue } from "./afread";
 import {
   IDENTITY, NONE, newDoc, newLayer, uid,
-  type Anchor, type ArrowHead, type Doc, type GroupNode, type Mat, type Page, type Paint, type Paragraph, type Run,
+  type Anchor, type ArrowHead, type BlendMode, type Doc, type GroupNode, type Mat, type Page, type Paint, type Paragraph, type Run,
   type SceneNode, type ShapeKind, type Stroke, type SubPath, type TextNode,
 } from "../model";
 import { apply, inv, mul, scaleOf } from "../geom";
@@ -123,7 +123,11 @@ class Importer {
   }
 
   base(n: KsObj, name: string) {
+    // Blnd : mode de fusion (numérotation du fichier, relevée dans Affinity ; absent = normal)
+    const bm = BLND[(n.Blnd as number | undefined) ?? 0];
+    if ((n.Blnd as number | undefined) && !bm) this.note(`mode de fusion ${n.Blnd} rendu en normal`);
     return {
+      ...(bm ? { blend: bm } : {}),
       id: uid(),
       name: (n.Desc as string) || name,
       visible: n.Visi !== false,
@@ -181,7 +185,7 @@ class Importer {
       const mask = clip.$class === "ShpN" ? this.shape(clip, cum) : this.curve(clip, cum);
       // masque invisible : il découpe seulement (la forme d'un « contenu dans une forme » reste, elle, dessinée)
       mask.visible = false; mask.opacity = 1;
-      const inner = { ...out, transform: [...IDENTITY] as Mat, visible: true, opacity: 1 } as SceneNode;
+      const inner = { ...out, transform: [...IDENTITY] as Mat, visible: true, opacity: 1, blend: undefined } as SceneNode;
       const g: GroupNode = { ...this.base(n, out.name), type: "group", transform: out.transform, children: [inner], mask };
       return g;
     }
@@ -427,6 +431,11 @@ class Importer {
   }
   linked = 0;
 }
+
+const BLND: Record<number, BlendMode> = {
+  1: "darken", 2: "multiply", 3: "color-burn", 4: "lighten", 5: "screen", 6: "color-dodge", 8: "overlay", 9: "soft-light",
+  10: "hard-light", 14: "difference", 15: "exclusion", 17: "hue", 18: "saturation", 19: "luminosity", 20: "color",
+};
 
 const sameStyle = (a: Run, b: Run) =>
   a.font === b.font && a.size === b.size && a.weight === b.weight && a.italic === b.italic && a.color === b.color && a.opacity === b.opacity

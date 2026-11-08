@@ -54,16 +54,16 @@
     <div class="tabs"><button data-tab="layers" class="on">Calques</button><button data-tab="competences">Compétences</button></div>
     <section id="layers" class="panel grow"></section><section id="competences" class="panel grow" hidden></section></aside>
   <main id="stage"><div id="master-banner" hidden></div></main>
-  <aside id="right"><section id="export" class="panel">
-    <div class="panel-head"><h3>Exporter</h3></div>
+  <aside id="right"><details id="export" class="panel" open>
+    <summary class="panel-head"><h3>Exporter</h3></summary>
     <div class="ex-grid">
-      <button data-act="save" title="Enregistrer — fichier .fstudio"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z M8 4v5h7V4 M8 20v-6h8v6"/></svg><span>Enregistrer<small>fichier .fstudio</small></span></button>
-      <button data-act="pdf" title="PDF… — tout, par feuille ou par partie"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z M14 3v5h5 M9.5 14h5 M9.5 17h5"/></svg><span>PDF…<small>tout, par feuille ou par partie</small></span></button>
-      <button data-act="pdfseries" title="PDF en série… — une fiche par ligne du CSV"><svg viewBox="0 0 24 24"><path d="M6 5h9l3 3v11H6z M9 2h9l3 3v11 M9 12h6 M9 15h6"/></svg><span>PDF en série…<small>une fiche par ligne du CSV</small></span></button>
-      <button data-act="print" title="Imprimer… — impression du navigateur"><svg viewBox="0 0 24 24"><path d="M7 9V4h10v5 M5 9h14v7h-3 M8 16H5V9 M8 13h8v7H8z"/></svg><span>Imprimer…<small>impression du navigateur</small></span></button>
-      <button data-act="svg" title="SVG de la page — dessin vectoriel"><svg viewBox="0 0 24 24"><path d="M4 18 9 7l4 8 2-4 5 7z M4 20h16"/></svg><span>SVG de la page<small>dessin vectoriel</small></span></button>
-      <button data-act="affinity" title="Pour Affinity — script qui recrée un .af"><svg viewBox="0 0 24 24"><path d="M12 3 3 19h18z M8 14h8"/></svg><span>Pour Affinity<small>script qui recrée un .af</small></span></button>
-    </div></section>
+      <button data-act="save" title="Enregistrer — fichier .fstudio"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z M8 4v5h7V4 M8 20v-6h8v6"/></svg><span>Enregistrer</span></button>
+      <button data-act="pdf" title="PDF… — tout, par feuille ou par partie"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7z M14 3v5h5 M9.5 14h5 M9.5 17h5"/></svg><span>PDF</span></button>
+      <button data-act="pdfseries" title="PDF en série… — une fiche par ligne du CSV"><svg viewBox="0 0 24 24"><path d="M6 5h9l3 3v11H6z M9 2h9l3 3v11 M9 12h6 M9 15h6"/></svg><span>PDF en série</span></button>
+      <button data-act="print" title="Imprimer… — impression du navigateur"><svg viewBox="0 0 24 24"><path d="M7 9V4h10v5 M5 9h14v7h-3 M8 16H5V9 M8 13h8v7H8z"/></svg><span>Imprimer</span></button>
+      <button data-act="svg" title="SVG de la page — dessin vectoriel"><svg viewBox="0 0 24 24"><path d="M4 18 9 7l4 8 2-4 5 7z M4 20h16"/></svg><span>SVG</span></button>
+      <button data-act="affinity" title="Pour Affinity — script qui recrée un .af"><svg viewBox="0 0 24 24"><path d="M12 3 3 19h18z M8 14h8"/></svg><span>Affinity</span></button>
+    </div></details>
     <section id="props" class="panel grow"></section><section id="data" class="panel"></section></aside>
   <footer id="status"></footer>
   <script type="module" src="/src/main.ts"></script>

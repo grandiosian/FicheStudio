@@ -2,7 +2,7 @@
 // en .af natif quand on l'exécute dans Affinity (panneau Scripts ou passerelle MCP).
 // Chaque appel du SDK utilisé ici a été validé dans Affinity 3.3.
 import type { Doc, Mat, Paint, Paragraph, SceneNode, Stroke } from "../model";
-import { masterAreas } from "../model";
+import { BLEND_MODES, masterAreas } from "../model";
 import { apply, mul, rotationOf, shapeToSubpaths } from "../geom";
 import { boundColor, computeNumbering, prepareText, varsFor } from "../templates";
 import { cutLines, masterLayerMatrix } from "../render";
@@ -13,12 +13,13 @@ interface Ctx { vars: Record<string, string>; numbers: Map<Paragraph, string> }
 
 type Color = [number, number, number, number]; // RVBA 0-255
 interface XStroke { color: Color | null; width: number; dash: number[] | null; cap: number; join: number }
-type Item =
+type Item = (
   | { k: "path"; name: string; sub: { closed: boolean; pts: number[][] }[]; fill: Color | null; stroke: XStroke; opacity: number; hidden: boolean; children?: Item[] }
   | { k: "rect" | "ellipse"; name: string; box: number[]; fill: Color | null; stroke: XStroke; opacity: number; hidden: boolean; children?: Item[] }
   | { k: "text"; name: string; frame: number[] | null; angle: number; origin: number[]; paras: { align: number; lh: number; la: number; li: number; ri: number; fi: number; sb: number; sa: number; tab: number; runs: { t: string; font: string; size: number; weight: number; italic: boolean; color: Color }[] }[]; opacity: number; hidden: boolean }
   | { k: "image"; name: string; w: number; h: number; px: string; m: number[]; opacity: number; hidden: boolean }
-  | { k: "group"; name: string; children: Item[]; opacity: number; hidden: boolean; tag?: Color | null };
+  | { k: "group"; name: string; children: Item[]; opacity: number; hidden: boolean; tag?: Color | null }
+) & { bm?: string }; // mode de fusion (nom du BlendMode d'Affinity)
 
 const hex = (c: string, o = 1): Color => {
   const v = parseInt(c.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
@@ -56,7 +57,7 @@ async function pixels(doc: Doc, asset: string, w: number, h: number): Promise<{ 
 async function flatten(doc: Doc, n: SceneNode, parent: Mat, cx: Ctx): Promise<Item | null> {
   const M = mul(parent, n.transform);
   const sc = Math.sqrt(Math.abs(M[0] * M[3] - M[1] * M[2])) || 1;
-  const common = { name: n.name, opacity: n.opacity, hidden: !n.visible };
+  const common = { name: n.name, opacity: n.opacity, hidden: !n.visible, ...(n.blend && n.blend !== "normal" ? { bm: BLEND_MODES.find((b) => b.id === n.blend)?.af } : {}) };
   const axis = Math.abs(M[1]) < 1e-6 && Math.abs(M[2]) < 1e-6 && M[0] > 0 && M[3] > 0;
   switch (n.type) {
     case "group": {
@@ -192,6 +193,7 @@ const { StoryBuilder } = require('/storybuilder.js');
 const { Font, FontWeight, FontWidth } = require('/fonts.js');
 const { ParagraphAlignXType, ParagraphLeadingType } = require('/paragraphatts.js');
 const { DocumentCommand } = require('/commands.js');
+const { BlendMode } = require('affinity:common');
 
 const opts = NewDocumentOptions.createDefault();
 opts.units = UnitType.Pixel;
@@ -234,6 +236,7 @@ function finish(node, it) {
   try { if (it.name) node.userDescription = it.name; } catch (e) {}
   if (it.opacity < 1) doc.setOpacity(it.opacity, [node]);
   if (it.hidden) doc.setVisible(false, [node]);
+  if (it.bm) { try { doc.setBlendMode(BlendMode[it.bm], false, node); } catch (e) {} }
 }
 
 function add(it, parent) {

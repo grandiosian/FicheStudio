@@ -127,6 +127,17 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   arrêtée, tableau de toutes les classes, remise à zéro. Le bouton **🏁 Fin de cours** de la présentation
   (touche Fin) marque où la classe s'est arrêtée : la séance est ajoutée à l'**historique des séances** de la
   classe (date, « de … à … »), le drapeau 🏁 apparaît sur la feuille, et « Reprendre » repart du dernier marqueur. F5 présente directement le document affiché.
+- **Avec la Centrale** (FicheStudio ouvert depuis le tableau de bord de l'espace enseignant, adresse
+  `…/admin/appli.php/fichestudio/`) : les **classes et demi-groupes** de la Centrale remplacent la liste saisie
+  à la main (rangés par établissement), le **cours en cours** d'après l'emploi du temps est choisi d'office
+  (« ● en cours », sinon « prochain 13:55 »), et l'avancement de la correction est **enregistré sur la Centrale**
+  (`api/fichestudio.php`) : il suit d'un ordinateur à l'autre (maison ↔ salle de classe). Pastille
+  « ☁ Centrale · enregistré » / « envoi… » / « ⚠ non enregistré » (nouvel essai toutes les 10 s). Ouvert
+  ailleurs (GitHub Pages, local), FicheStudio garde ses classes et l'avancement dans le navigateur.
+- **Documents de la Centrale** (même condition) : « ☁ Enregistrer » range le document ouvert sur la Centrale
+  (`.fstudio`, images liées intégrées, dans `data/fichestudio/` du serveur, jamais public) ; « ☁ Ouvrir… » le
+  rouvre depuis n'importe quel poste, pour projeter un atelier sans avoir le fichier Affinity sur l'ordinateur
+  de la salle. L'avancement des classes suit le nom du document.
 - **Œil et cadenas** : zones cliquables de 24 px ; appuyer puis glisser sur d'autres lignes masque,
   affiche ou verrouille plusieurs calques d'un coup (une seule annulation).
 - **Couleurs en direct** : la page suit le sélecteur de couleur pendant qu'on le fait glisser ;

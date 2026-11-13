@@ -12,7 +12,7 @@ import { assetBytes } from "./assets";
 /** sub : groupe (demi-classe) d'une classe de la Centrale ; etab : établissement (Centrale). */
 export interface Classe { id: string; name: string; level: string; sub?: boolean; etab?: string }
 interface PageProg { shown: number; total: number; at: number }
-interface Pos { page: string; shown: number; total?: number }
+interface Pos { page: string; shown: number; total?: number; pt?: { x: number; y: number } }
 /** Une séance : de la position de départ jusqu'au marqueur « fin de cours ». */
 interface Session { at: number; from: Pos | null; to: Pos }
 interface DocProg { last?: Pos; mark?: Pos & { at: number }; sessions?: Session[]; pages: Record<string, PageProg> }
@@ -138,7 +138,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
   };
   // tableau « toutes les classes » : via la Centrale, seulement celles qui ont commencé ce document (et la classe choisie)
   const matrixClasses = viaCentrale ? classes.filter((c) => c.id === current || progress[c.id]?.[docKey()]) : classes;
-  const posLabel = (p: Pos | null) => (p ? `${esc(p.page)}, étape ${p.shown}${p.total ? ` / ${p.total}` : ""}` : "début");
+  const posLabel = (p: Pos | null) => (p ? `${esc(p.page)}, étape ${p.shown}${p.total ? ` / ${p.total}` : ""}${p.pt ? " 📍" : ""}` : "début");
 
   root.innerHTML = `
     <header class="ps-head">
@@ -179,7 +179,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
           <tbody>${pages.map(({ p, i, key }) => {
             const s = cls ? statusOf(cls.id, p, i) : { st: "todo" as Status, shown: 0, total: countSteps(p) };
             const w = s.total ? Math.round((100 * Math.min(s.shown, s.total)) / s.total) : s.st === "done" ? 100 : 0;
-            const flag = dp?.mark && dp.mark.page === key ? `<span class="ps-flag" title="Fin du dernier cours de ${esc(cls!.name)}">🏁 fin du cours du ${day(dp.mark.at)} · étape ${dp.mark.shown}</span>` : "";
+            const flag = dp?.mark && dp.mark.page === key ? `<span class="ps-flag" title="Fin du dernier cours de ${esc(cls!.name)}">🏁 fin du cours du ${day(dp.mark.at)} · étape ${dp.mark.shown}${dp.mark.pt ? " · 📍 repère" : ""}</span>` : "";
             return `<tr class="${ex.has(key) ? "off" : ""} ${resume?.i === i ? "last" : ""}">
               <td><input type="checkbox" data-sel="${esc(key)}" ${ex.has(key) ? "" : "checked"}></td>
               <td><span class="kind-tag k-${p.kind ?? "fiche"}">${SHEET_KINDS[p.kind ?? "fiche"].prefix}</span> ${esc(p.name)} ${flag}</td>
@@ -248,7 +248,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     persist(cls.id); redraw();
   });
 
-  const launch = (start?: number, shown?: number) => {
+  const launch = (start?: number, shown?: number, pin?: { page: number; x: number; y: number; label: string }) => {
     const order = chosen.map((x) => x.i);
     if (start !== undefined && !order.includes(start)) order.push(start), order.sort((a, b) => a - b);
     if (!order.length) return;
@@ -268,16 +268,17 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
         d.last = { page: key, shown: sh };
         persist(c.id);
       },
-      onMark: c ? (pi, sh, total) => {
+      pin: pin ?? undefined,
+      onMark: c ? (pi, sh, total, pt) => {
         const d = docProg(c.id), key = pageKey(store.doc.pages[pi], pi);
-        const to = { page: key, shown: sh, total };
+        const to: Pos = { page: key, shown: sh, total, ...(pt ? { pt } : {}) };
         d.mark = { ...to, at: Date.now() };
         d.sessions ??= [];
         // un second marquage pendant la même présentation corrige la séance au lieu d'en ajouter une
         if (sessionIndex >= 0 && d.sessions[sessionIndex]) d.sessions[sessionIndex] = { ...d.sessions[sessionIndex], to, at: Date.now() };
         else { d.sessions.push({ at: Date.now(), from: startPos, to }); sessionIndex = d.sessions.length - 1; }
         persist(c.id);
-        return `🏁 Fin de cours enregistrée pour ${c.name} : ${store.doc.pages[pi].name}, étape ${sh}${total ? ` / ${total}` : ""}. La prochaine séance reprendra ici.`;
+        return `🏁 Fin de cours enregistrée pour ${c.name} : ${store.doc.pages[pi].name}, étape ${sh}${total ? ` / ${total}` : ""}${pt ? ", au repère 📍" : ""}. La prochaine séance reprendra ici.`;
       } : undefined,
       onClose: () => { root.style.display = ""; redraw(); },
     });
@@ -292,7 +293,12 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     if (lastS) dp.mark = { ...lastS.to, at: lastS.at }; else delete dp.mark;
     persist(cls.id); redraw();
   }));
-  $<HTMLElement>('[data-k="resume"]')?.addEventListener("click", () => resume && launch(resume.i, resume.shown));
+  // reprise au 🏁 : le repère posé au cours précédent est réaffiché sur la feuille
+  $<HTMLElement>('[data-k="resume"]')?.addEventListener("click", () => {
+    if (!resume) return;
+    const pt = resume.mark ? dp?.mark?.pt : undefined;
+    launch(resume.i, resume.shown, pt ? { page: resume.i, x: pt.x, y: pt.y, label: `Reprise · arrêt du ${day(dp!.mark!.at)}` } : undefined);
+  });
   root.querySelectorAll<HTMLElement>("[data-from]").forEach((b) => (b.onclick = () => launch(+b.dataset.from!, 0)));
 }
 

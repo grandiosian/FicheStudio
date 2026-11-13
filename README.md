@@ -120,6 +120,11 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   corrigés à venir **en transparence** (invisibles au projecteur) avec la prochaine étape surlignée,
   un chronomètre, et les boutons **Écran noir** (N) et **Figer** (K). Les flèches et Espace
   fonctionnent depuis les deux fenêtres. Autoriser les fenêtres surgissantes pour le site.
+- **Repère de fin de cours** (bouton « Repère » de la barre de présentation, touche J) : un clic sur la feuille pose
+  une épingle orange et une ligne pointillée à l'endroit où la classe s'arrête ; c'est aussi la fin de cours 🏁
+  (feuille, étape et point enregistrés pour la classe). Au cours suivant, « Reprendre » rouvre la feuille à la même
+  étape, le repère affiché (aussi au vidéoprojecteur) et la vue cadrée pleine largeur dessus. Le reposer pendant le
+  même cours le déplace.
 - **Renvois cliquables en présentation** : « (aide : ressource 9) », « ressources 9 et 10 », « ressource SEGPA 2 »
   ou un nom de feuille (« R09 », « E01 ») sont encadrés en bleu sur l'écran du professeur (jamais projetés). Un clic
   affiche la ressource : sa feuille, cadrée sur l'encadré titré « Ressource 9 » quand il existe (R04 contient les

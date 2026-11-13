@@ -223,6 +223,8 @@ body.resizing { cursor: col-resize; user-select: none; }
 #present svg[data-tool="pointer"] { cursor: zoom-in; }
 #present svg[data-tool="pen"], #present svg[data-tool="marker"], #present svg[data-tool="arrow"] { cursor: crosshair; }
 #present svg[data-tool="eraser"] { cursor: cell; }
+#present svg[data-tool="pin"] { cursor: copy; }
+#present .pin { pointer-events: none; }
 #present .sheet { filter: drop-shadow(0 6px 24px rgba(0,0,0,.5)); }
 #present .reflink { fill: rgba(79,140,255,.13); stroke: rgba(79,140,255,.85); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: pointer; }
 #present .reflink:hover { fill: rgba(79,140,255,.3); }

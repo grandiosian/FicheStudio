@@ -8,7 +8,7 @@ import { renderPage } from "./render";
 import type { GroupNode, Page, SceneNode } from "./model";
 import { findRefs, resourceIndex, type RefTarget } from "./reflinks";
 
-type Tool = "pointer" | "hand" | "pen" | "marker" | "arrow" | "eraser";
+type Tool = "pointer" | "hand" | "pen" | "marker" | "arrow" | "eraser" | "pin";
 const LEVELS = [1, 1.5, 2, 3, 4]; // × la feuille entière
 type BoardBg = "blanc" | "carreaux" | "seyes" | "noir";
 interface Rect { x: number; y: number; w: number; h: number }
@@ -38,6 +38,7 @@ const IC = {
   proj: "M3 8.5h18v8H3z M7 16.5 5.5 20 M17 16.5l1.5 3.5 M15 12.5m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M6 11.5h4", fs: "M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5", quit: "M6 6l12 12 M18 6 6 18",
   plus: "M12 5v14 M5 12h14",
   flag: "M6 21V4 M6 4h11l-2 4 2 4H6",
+  pin: "M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 1 1 13 0c0 4.8-6.5 11-6.5 11z M12 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z",
   text: "M4 7V5h10v2 M9 5v14 M7 19h4 M14 12v-1.5h7V12 M17.5 10.5V19 M16 19h3", minus: "M5 12h14", fit: "M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5 M9 9h6v6H9z", auto: "M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13z M15.5 15.5 20.5 20.5 M8 10.5l2 2 3.5-4",
   trash: "M5 7h14 M10 7V4h4v3 M7 7l1 13h8l1-13",
   pointer: "M5.5 3.5 18 10.6l-5.4 1.5-3.1 5.6z", hand: "M8 12.5V6a1.4 1.4 0 0 1 2.8 0v5 M10.8 10.5V4.6a1.4 1.4 0 0 1 2.8 0v5.9 M13.6 10.5V5.8a1.4 1.4 0 0 1 2.8 0v5.7 M16.4 11.5V8.6a1.4 1.4 0 0 1 2.8 0V14c0 4-2.8 7-6.6 7-2.6 0-4.2-1.2-5.6-3.3L4.6 14a1.5 1.5 0 0 1 2.4-1.8l1 1.3",
@@ -69,11 +70,16 @@ class Presenter {
   onProgress?: (pageIndex: number, shown: number, total: number) => void;
   onClose?: () => void;
   /** Marqueur « fin de cours » de la classe (espace Présentation) ; renvoie le message à afficher. */
-  onMark?: (pageIndex: number, shown: number, total: number) => string;
+  onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number }) => string;
   marked = false;
   board: number | null = null;
   /** Détour vers une ressource (renvoi cliqué) : où revenir dans la correction. */
   ret: { pageIndex: number; shown: number; view: { s: number; x: number; y: number }; focus: Rect | null } | null = null;
+  /** Repère de fin de cours : point de la feuille où la classe s'est arrêtée (posé, ou repris du cours précédent). */
+  pin: { page: number; x: number; y: number; label: string } | null = null;
+  /** Vue cadrée sur le repère (reprise) : gardée quand la fenêtre change de taille (passage en plein écran). */
+  pinFocus = false;
+  pinG!: SVGGElement;
   linksG!: SVGGElement;
   linkTargets: RefTarget[] = [];
   backEl: HTMLButtonElement | null = null;
@@ -94,13 +100,14 @@ class Presenter {
   open() {
     this.root = document.createElement("div");
     this.root.id = "present";
-    this.root.innerHTML = `<svg xmlns="${NS}"><defs></defs><g class="world"><g class="sheet"></g><g class="links"></g><g class="ink"></g></g></svg><div class="pbar"></div><div class="phint"></div>`;
+    this.root.innerHTML = `<svg xmlns="${NS}"><defs></defs><g class="world"><g class="sheet"></g><g class="links"></g><g class="ink"></g><g class="pin"></g></g></svg><div class="pbar"></div><div class="phint"></div>`;
     document.body.appendChild(this.root);
     this.svg = this.root.querySelector("svg")!;
     this.world = this.root.querySelector(".world")!;
     this.sheet = this.root.querySelector(".sheet")!;
     this.inkG = this.root.querySelector(".ink")!;
     this.linksG = this.root.querySelector(".links")!;
+    this.pinG = this.root.querySelector(".pin")!;
     this.bar = this.root.querySelector(".pbar")!;
     this.root.requestFullscreen?.().catch(() => { /* refusé : on reste dans la fenêtre */ });
     window.addEventListener("keydown", this.onKey, true);
@@ -114,7 +121,7 @@ class Presenter {
     this.root.addEventListener("pointermove", this.wake);
     this.onResize();
     this.load();
-    this.hint("→ / Espace : étape suivante · Espace maintenu ou bouton du milieu : déplacer · clic sur « ressource 9 » : la ressource (↩ pour revenir) · clic sur un bloc ou rectangle tracé : plein écran · rectangle tracé vers la gauche : dézoom · molette : zoom · P stylo · M surligneur · A flèche · G gomme · Échap : quitter");
+    this.hint("→ / Espace : étape suivante · Espace maintenu ou bouton du milieu : déplacer · clic sur « ressource 9 » : la ressource (↩ pour revenir) · clic sur un bloc ou rectangle tracé : plein écran · rectangle tracé vers la gauche : dézoom · molette : zoom · P stylo · M surligneur · A flèche · G gomme · J repère de fin de cours · Échap : quitter");
   }
 
   close = () => {
@@ -139,6 +146,7 @@ class Presenter {
 
   load(revealAll = false) {
     this.focus = null;
+    this.pinFocus = false;
     this.blocks = null;
     const defs = this.svg.querySelector("defs")!;
     if (this.board !== null) {
@@ -230,8 +238,10 @@ class Presenter {
   markEnd() {
     if (!this.onMark || this.board !== null) return;
     const r = this.ret;
-    const msg = r ? this.onMark(r.pageIndex, r.shown, countSteps(store.doc.pages[r.pageIndex]))
-      : this.onMark(this.pageIndex, this.shown, this.steps.length);
+    const pi = r ? r.pageIndex : this.pageIndex;
+    const pt = this.pin && this.pin.page === pi ? { x: Math.round(this.pin.x), y: Math.round(this.pin.y) } : undefined;
+    const msg = r ? this.onMark(r.pageIndex, r.shown, countSteps(store.doc.pages[r.pageIndex]), pt)
+      : this.onMark(this.pageIndex, this.shown, this.steps.length, pt);
     this.marked = true;
     this.hint(msg);
     this.renderBar();
@@ -430,6 +440,7 @@ class Presenter {
   }
 
   zoomTo(r: Rect | null, margin = 0.06) {
+    this.pinFocus = false;
     this.focus = r;
     this.setView(this.fitRect(r ?? this.sheetRect(), r ? margin : 0.03));
     this.renderBar();
@@ -438,6 +449,7 @@ class Presenter {
   /** Niveau de zoom relatif à la feuille entière (1 = feuille entière), autour du centre de l'écran. */
   get level() { return (this.targetS ?? this.view.s) / this.fitRect(this.sheetRect()).s; }
   setLevel(z: number) {
+    this.pinFocus = false;
     const fit = this.fitRect(this.sheetRect());
     if (z <= 1.001) { this.zoomTo(null); return; }
     const s = fit.s * z, cx = this.size.w / 2, cy = this.size.h / 2;
@@ -452,6 +464,7 @@ class Presenter {
   }
   /** Dézoom d'un cran en gardant le point (repère feuille) au même endroit de l'écran. */
   zoomOutAt(px: number, py: number) {
+    this.pinFocus = false;
     const z = this.level;
     const next = [...LEVELS].reverse().find((l) => l < z - 0.01) ?? 1;
     if (next <= 1.001) { this.zoomTo(null); return; }
@@ -462,6 +475,7 @@ class Presenter {
     this.renderBar();
   }
   fitWidth() {
+    this.pinFocus = false;
     const r = this.sheetRect();
     const f = this.proj?.alive ? this.projFrame() : { x: 0, y: 0, w: this.size.w, h: this.size.h };
     const s = f.w / (r.w * 1.02);
@@ -472,6 +486,7 @@ class Presenter {
 
   onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    this.pinFocus = false;
     const r = this.svg.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
     const s = Math.max(0.05, Math.min(40, this.view.s * Math.exp(-e.deltaY * 0.0025)));
@@ -486,6 +501,7 @@ class Presenter {
     this.size = { w: b.width || innerWidth, h: b.height || innerHeight };
     this.layoutFrame();
     this.svg.setAttribute("viewBox", `0 0 ${this.size.w} ${this.size.h}`);
+    if (this.pinFocus) { this.showPin(); return; }
     const f = this.focus && this.focus.w ? this.focus : null;
     this.setView(this.fitRect(f ?? this.sheetRect(), f ? 0.06 : 0.03), false);
   };
@@ -608,7 +624,7 @@ class Presenter {
     if (!this.proj?.alive) return;
     this.proj.setSheet(this.svg.querySelector("defs")!.innerHTML, this.sheet.innerHTML);
     this.proj.setSteps(this.steps, this.shown);
-    this.proj.setInk(this.inkG.innerHTML);
+    this.proj.setInk(this.inkHtml());
     this.syncView();
     if (this.textMode) this.renderText(); else this.proj.setText(null);
   }
@@ -666,6 +682,7 @@ class Presenter {
       this.marquee = { x0: x, y0: y, x1: x, y1: y, el: r, target: e.target as Element };
       return;
     }
+    if (this.tool === "pin") { const [x, y] = this.toSheet(e); this.placePin(x, y); return; }
     if (this.tool === "eraser") { this.erase(e); this.svg.setPointerCapture(e.pointerId); this.drawing = null; this.erasing = true; return; }
     this.svg.setPointerCapture(e.pointerId);
     const [x, y] = this.toSheet(e);
@@ -714,7 +731,7 @@ class Presenter {
       s.pts.push(x, y);
     }
     this.paint(this.drawing.el, s);
-    this.proj?.setInk(this.inkG.innerHTML);
+    this.proj?.setInk(this.inkHtml());
   };
 
   onUp = () => {
@@ -754,7 +771,7 @@ class Presenter {
     const list = ink.get(this.key) ?? [];
     list.splice(i, 1);
     el.remove();
-    this.proj?.setInk(this.inkG.innerHTML);
+    this.proj?.setInk(this.inkHtml());
     this.renderBar();
   }
 
@@ -780,14 +797,59 @@ class Presenter {
     el.setAttribute("class", s.tool === "marker" ? "hl" : "");
   }
 
+  /** Annotations envoyées au projecteur : traits et repère de fin de cours (les élèves voient où l'on s'est arrêté). */
+  inkHtml() { return this.inkG.innerHTML + this.pinG.innerHTML; }
+
+  drawPin() {
+    const p = this.pin, page = this.page;
+    if (!p || !page || p.page !== this.pageIndex) { this.pinG.innerHTML = ""; return; }
+    const W = page.width, r = W * 0.017, sw = r * 0.18;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const fs = r * 1.05, tw = p.label.length * fs * 0.56 + r * 1.6;
+    // pointe de l'épingle sur le point ; ligne pointillée sur toute la largeur : « on s'est arrêtés à cette hauteur »
+    const tx = p.x + r * 1.6 + tw > W ? p.x - r * 1.6 - tw : p.x + r * 1.6;
+    this.pinG.innerHTML = `<line x1="0" x2="${W}" y1="${p.y}" y2="${p.y}" stroke="#f5a51e" stroke-width="${sw * 1.4}" stroke-dasharray="${r * 0.9} ${r * 0.6}" opacity=".9"/>
+      <path d="M${p.x} ${p.y} C${p.x - r * 0.5} ${p.y - r * 1.4} ${p.x - r * 1.25} ${p.y - r * 1.9} ${p.x - r * 1.25} ${p.y - r * 2.7} a${r * 1.25} ${r * 1.25} 0 1 1 ${r * 2.5} 0 C${p.x + r * 1.25} ${p.y - r * 1.9} ${p.x + r * 0.5} ${p.y - r * 1.4} ${p.x} ${p.y}z" fill="#f5a51e" stroke="#1b2230" stroke-width="${sw}"/>
+      <circle cx="${p.x}" cy="${p.y - r * 2.7}" r="${r * 0.48}" fill="#1b2230"/>
+      <rect x="${tx}" y="${p.y - r * 3.35}" width="${tw}" height="${r * 1.7}" rx="${r * 0.85}" fill="#1b2230" opacity=".92"/>
+      <text x="${tx + tw / 2}" y="${p.y - r * 2.2}" text-anchor="middle" style="font:700 ${fs}px system-ui,sans-serif;fill:#f5a51e">${esc(p.label)}</text>`;
+  }
+
+  /** Outil Repère : poser l'épingle là où la classe s'arrête ; c'est aussi la fin de cours (🏁). */
+  placePin(x: number, y: number) {
+    if (this.board !== null || !this.page) { this.hint("Le repère se pose sur une feuille, pas sur le tableau."); return; }
+    if (this.ret) { this.hint("Revenez d'abord à la correction (↩) pour poser le repère."); return; }
+    const d = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+    this.pin = { page: this.pageIndex, x, y, label: `Arrêt du ${d}${this.label ? ` · ${this.label}` : ""}` };
+    this.drawPin();
+    this.proj?.setInk(this.inkHtml());
+    this.setTool("pointer");
+    if (this.onMark) this.markEnd();
+    else this.hint("Repère posé. Pour qu'il soit gardé jusqu'au prochain cours, choisissez une classe dans l'espace Présentation.");
+  }
+
+  /** Reprise : pleine largeur, le repère au tiers de la hauteur de l'écran. */
+  showPin() {
+    const p = this.pin, page = this.page;
+    if (!p || !page || p.page !== this.pageIndex) return;
+    const f = this.proj?.alive ? this.projFrame() : { x: 0, y: 0, w: this.size.w, h: this.size.h };
+    const s = f.w / (page.width * 1.02);
+    if (page.height * s <= f.h) return; // la feuille tient déjà en entier à cette échelle
+    this.focus = { x: 0, y: 0, w: 0, h: 0 };
+    this.pinFocus = true;
+    this.setView({ s, x: f.x + (f.w - page.width * s) / 2, y: f.y + f.h / 3 - p.y * s });
+    this.renderBar();
+  }
+
   drawInk() {
+    this.drawPin();
     this.inkG.innerHTML = "";
     for (const s of ink.get(this.key) ?? []) {
       const el = document.createElementNS(NS, "path");
       this.inkG.appendChild(el);
       this.paint(el, s);
     }
-    this.proj?.setInk(this.inkG.innerHTML);
+    this.proj?.setInk(this.inkHtml());
   }
 
   clearInk() { ink.delete(this.key); this.drawInk(); this.renderBar(); }
@@ -868,6 +930,7 @@ class Presenter {
       arrowleft: () => this.prev(), pageup: () => this.prev(), arrowup: () => this.prev(), backspace: () => this.prev(),
       escape: () => (this.textMode ? this.closeText() : this.ret ? this.goBack() : this.focus ? this.zoomTo(null) : this.close()),
       r: () => this.ret && this.goBack(),
+      j: () => this.setTool(this.tool === "pin" ? "pointer" : "pin"),
       t: () => (this.textMode ? this.closeText() : this.openText("step")),
       end: () => this.markEnd(),
       home: () => this.zoomTo(null), "0": () => this.zoomTo(null),
@@ -908,7 +971,7 @@ class Presenter {
 
   renderBar() {
     const name = this.board !== null ? `Tableau ${this.board + 1} / ${boards.length}` : `${this.order.indexOf(this.pageIndex) + 1} / ${this.order.length} · ${this.page?.name ?? ""}`;
-    const tools: [Tool, string, string][] = [["pointer", IC.pointer, "Pointeur : clic sur un bloc ou rectangle tracé = plein écran ; tracé vers la gauche = dézoom (V)"], ["hand", IC.hand, "Main : se déplacer dans la feuille agrandie (H, ou bouton du milieu)"], ["pen", IC.pen, "Stylo (P)"], ["marker", IC.marker, "Surligneur (M)"], ["arrow", IC.arrow, "Flèche (A)"], ["eraser", IC.eraser, "Gomme (G)"]];
+    const tools: [Tool, string, string][] = [["pointer", IC.pointer, "Pointeur : clic sur un bloc ou rectangle tracé = plein écran ; tracé vers la gauche = dézoom (V)"], ["hand", IC.hand, "Main : se déplacer dans la feuille agrandie (H, ou bouton du milieu)"], ["pen", IC.pen, "Stylo (P)"], ["marker", IC.marker, "Surligneur (M)"], ["arrow", IC.arrow, "Flèche (A)"], ["eraser", IC.eraser, "Gomme (G)"], ["pin", IC.pin, "Repère de fin de cours : cliquer là où la classe s'arrête (J)"]];
     const ic = (d: string) => `<svg viewBox="0 0 24 24"><path d="${d}"/></svg>`;
     const big = (g: Presenter["sub"], icon: string, label: string, extra = "") =>
       `<button class="big ${this.sub === g ? "open" : ""}" data-g="${g}" title="${label}">${ic(icon)}${extra}<span>${label}</span></button>`;
@@ -943,6 +1006,7 @@ class Presenter {
       ${big("tool", curTool[1], "Outils", `<i class="dot" style="background:${this.color}"></i>`)}
       ${big("board", IC.board, "Tableau", this.board !== null ? `<i class="dot"></i>` : "")}
       <span class="vsep"></span>
+      <button class="big pinb ${this.tool === "pin" ? "open" : ""}" data-a="pin" title="Repère : cliquez sur la feuille à l'endroit où la classe s'arrête ; il marque la fin du cours et s'affiche à la reprise (J)">${ic(IC.pin)}<span>Repère</span></button>
       ${this.onMark ? `<button class="big mark ${this.marked ? "done" : ""}" data-a="mark" title="Fin de cours : enregistrer où la classe ${this.label.replace(/"/g, "")} s'est arrêtée (Fin)">${ic(IC.flag)}<span>${this.marked ? "Marqué" : "Fin de cours"}</span></button>` : ""}
       <button class="big ${this.proj?.alive ? "open" : ""}" data-a="proj" title="Double vue : interface sur cet écran, projection plein écran sur le vidéoprojecteur">${ic(IC.proj)}<span>Projeter</span></button>
       <button class="big" data-a="fs" title="Plein écran (F)">${ic(IC.fs)}<span>Écran</span></button>
@@ -952,7 +1016,7 @@ class Presenter {
       const a = b.dataset.a;
       if (b.dataset.g !== undefined) { this.sub = this.sub === b.dataset.g ? "" : (b.dataset.g as Presenter["sub"]); this.renderBar(); return; }
       if (b.dataset.t) this.setTool(b.dataset.t as Tool);
-      else if (b.dataset.c) { this.color = b.dataset.c; if (this.tool === "pointer" || this.tool === "eraser" || this.tool === "hand") this.tool = "pen"; this.renderBar(); }
+      else if (b.dataset.c) { this.color = b.dataset.c; if (this.tool === "pointer" || this.tool === "eraser" || this.tool === "hand" || this.tool === "pin") this.tool = "pen"; this.renderBar(); }
       else if (b.dataset.w) { this.width = +b.dataset.w; this.renderBar(); }
       else if (b.dataset.b) this.toggleBoard(b.dataset.b as BoardBg);
       else if (b.dataset.r) {
@@ -967,6 +1031,7 @@ class Presenter {
         hand: () => this.setTool(this.tool === "hand" ? "pointer" : "hand"),
         text: () => (this.textMode ? this.closeText() : this.openText("step")),
         mark: () => this.markEnd(),
+        pin: () => this.setTool(this.tool === "pin" ? "pointer" : "pin"),
         proj: () => (this.proj?.alive ? this.stopProjection() : this.openProjection()),
         fs: () => (document.fullscreenElement ? document.exitFullscreen() : this.root.requestFullscreen()).catch(() => {}),
         quit: () => this.close(),
@@ -1013,7 +1078,9 @@ export interface PresentOptions {
   label?: string;   // classe, affichée dans la barre
   onProgress?: (pageIndex: number, shown: number, total: number) => void;
   onClose?: () => void;
-  onMark?: (pageIndex: number, shown: number, total: number) => string;
+  onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number }) => string;
+  /** Repère du cours précédent, affiché (et cadré) à la reprise. */
+  pin?: { page: number; x: number; y: number; label: string };
   dual?: boolean;   // double vue : ouvrir aussi la fenêtre de projection
 }
 
@@ -1030,8 +1097,10 @@ export function startPresentation(pages?: number[], opts: PresentOptions = {}) {
   current.onProgress = opts.onProgress;
   current.onClose = opts.onClose;
   current.onMark = opts.onMark;
+  current.pin = opts.pin ?? null;
   const presenter = current;
   current.open();
+  if (opts.pin) requestAnimationFrame(() => presenter.showPin());
   if (opts.dual) presenter.openProjection();
 }
 

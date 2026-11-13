@@ -224,6 +224,13 @@ body.resizing { cursor: col-resize; user-select: none; }
 #present svg[data-tool="pen"], #present svg[data-tool="marker"], #present svg[data-tool="arrow"] { cursor: crosshair; }
 #present svg[data-tool="eraser"] { cursor: cell; }
 #present .sheet { filter: drop-shadow(0 6px 24px rgba(0,0,0,.5)); }
+#present .reflink { fill: rgba(79,140,255,.13); stroke: rgba(79,140,255,.85); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: pointer; }
+#present .reflink:hover { fill: rgba(79,140,255,.3); }
+#present svg:not([data-tool="pointer"]) .reflink { pointer-events: none; }
+#present .pback { position: absolute; top: 14px; left: 14px; z-index: 6; display: flex; align-items: baseline; gap: 10px;
+  padding: 10px 18px; border-radius: 999px; border: 0; background: #f5a51e; color: #1b2230; font: 700 16px system-ui, sans-serif; cursor: pointer; box-shadow: 0 6px 22px rgba(0,0,0,.45); }
+#present .pback small { font-weight: 500; font-size: 13px; opacity: .85; }
+#present .pback:hover { background: #ffb938; }
 #present .ink path.hl { opacity: .38; mix-blend-mode: multiply; }
 #present .pbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 6px 10px; background: rgba(20, 24, 32, .92); border: 1px solid #3a4150; border-radius: 12px; box-shadow: 0 10px 30px #000a; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; transition: opacity .3s; }
 #present.idle .pbar { opacity: .12; }

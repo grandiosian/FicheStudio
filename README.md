@@ -120,6 +120,11 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   corrigés à venir **en transparence** (invisibles au projecteur) avec la prochaine étape surlignée,
   un chronomètre, et les boutons **Écran noir** (N) et **Figer** (K). Les flèches et Espace
   fonctionnent depuis les deux fenêtres. Autoriser les fenêtres surgissantes pour le site.
+- **Renvois cliquables en présentation** : « (aide : ressource 9) », « ressources 9 et 10 », « ressource SEGPA 2 »
+  ou un nom de feuille (« R09 », « E01 ») sont encadrés en bleu sur l'écran du professeur (jamais projetés). Un clic
+  affiche la ressource : sa feuille, cadrée sur l'encadré titré « Ressource 9 » quand il existe (R04 contient les
+  ressources 8 et 9). Le bouton **↩ Revenir à la correction** (ou →, ←, Échap, R) ramène à la feuille, à l'étape et
+  au zoom d'où l'on venait ; pendant le détour, l'avancement de la classe ne bouge pas et 🏁 marque la correction.
 - **Espace Présentation** (bouton « ▶ Présentation ») : document à présenter (onglets ouverts ou
   explorateur de documents), feuilles à projeter, et **classes** (ex. 5eA, 4eB) avec leur niveau.
   L'avancement de la correction est enregistré pour chaque classe et chaque document : barre

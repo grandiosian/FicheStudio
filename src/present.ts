@@ -6,6 +6,7 @@ import { fitText, stepsHtml } from "./textfs";
 import { store } from "./store";
 import { renderPage } from "./render";
 import type { GroupNode, Page, SceneNode } from "./model";
+import { findRefs, resourceIndex, type RefTarget } from "./reflinks";
 
 type Tool = "pointer" | "hand" | "pen" | "marker" | "arrow" | "eraser";
 const LEVELS = [1, 1.5, 2, 3, 4]; // × la feuille entière
@@ -71,6 +72,12 @@ class Presenter {
   onMark?: (pageIndex: number, shown: number, total: number) => string;
   marked = false;
   board: number | null = null;
+  /** Détour vers une ressource (renvoi cliqué) : où revenir dans la correction. */
+  ret: { pageIndex: number; shown: number; view: { s: number; x: number; y: number }; focus: Rect | null } | null = null;
+  linksG!: SVGGElement;
+  linkTargets: RefTarget[] = [];
+  backEl: HTMLButtonElement | null = null;
+  refs = resourceIndex(store.doc);
   steps: string[] = [];
   shown = 0;
   tool: Tool = "pointer";
@@ -87,12 +94,13 @@ class Presenter {
   open() {
     this.root = document.createElement("div");
     this.root.id = "present";
-    this.root.innerHTML = `<svg xmlns="${NS}"><defs></defs><g class="world"><g class="sheet"></g><g class="ink"></g></g></svg><div class="pbar"></div><div class="phint"></div>`;
+    this.root.innerHTML = `<svg xmlns="${NS}"><defs></defs><g class="world"><g class="sheet"></g><g class="links"></g><g class="ink"></g></g></svg><div class="pbar"></div><div class="phint"></div>`;
     document.body.appendChild(this.root);
     this.svg = this.root.querySelector("svg")!;
     this.world = this.root.querySelector(".world")!;
     this.sheet = this.root.querySelector(".sheet")!;
     this.inkG = this.root.querySelector(".ink")!;
+    this.linksG = this.root.querySelector(".links")!;
     this.bar = this.root.querySelector(".pbar")!;
     this.root.requestFullscreen?.().catch(() => { /* refusé : on reste dans la fenêtre */ });
     window.addEventListener("keydown", this.onKey, true);
@@ -106,7 +114,7 @@ class Presenter {
     this.root.addEventListener("pointermove", this.wake);
     this.onResize();
     this.load();
-    this.hint("→ / Espace : étape suivante · Espace maintenu ou bouton du milieu : déplacer · clic sur un bloc ou rectangle tracé : plein écran · rectangle tracé vers la gauche : dézoom · molette : zoom · P stylo · M surligneur · A flèche · G gomme · Échap : quitter");
+    this.hint("→ / Espace : étape suivante · Espace maintenu ou bouton du milieu : déplacer · clic sur « ressource 9 » : la ressource (↩ pour revenir) · clic sur un bloc ou rectangle tracé : plein écran · rectangle tracé vers la gauche : dézoom · molette : zoom · P stylo · M surligneur · A flèche · G gomme · Échap : quitter");
   }
 
   close = () => {
@@ -179,6 +187,7 @@ class Presenter {
       this.applySteps();
     }
     this.drawInk();
+    this.buildLinks();
     this.setView(this.fitRect(this.sheetRect()), false);
     this.syncAll();
     this.renderBar();
@@ -220,7 +229,9 @@ class Presenter {
   /** Fin de cours : la position actuelle (feuille et étape) devient le point de reprise de la classe. */
   markEnd() {
     if (!this.onMark || this.board !== null) return;
-    const msg = this.onMark(this.pageIndex, this.shown, this.steps.length);
+    const r = this.ret;
+    const msg = r ? this.onMark(r.pageIndex, r.shown, countSteps(store.doc.pages[r.pageIndex]))
+      : this.onMark(this.pageIndex, this.shown, this.steps.length);
     this.marked = true;
     this.hint(msg);
     this.renderBar();
@@ -276,6 +287,118 @@ class Presenter {
       const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
       return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
     } catch { return null; } finally { el.style.display = prev; }
+  }
+
+  // ------------------------------------------------------------ renvois vers les ressources
+
+  /** Zones cliquables sur les renvois de la feuille (« ressource 9 », « R09 ») ; jamais projetées. */
+  buildLinks() {
+    this.linksG.innerHTML = "";
+    this.linkTargets = [];
+    const page = this.page;
+    if (!page) return;
+    const sheets = new Map(store.doc.pages.map((p, i) => [p.name, i]));
+    const worldInv = this.world.getCTM()?.inverse();
+    if (!worldInv) return;
+    const texts: SceneNode[] = [];
+    const visit = (nodes: SceneNode[]) => {
+      for (const n of nodes) {
+        if (!n.visible || isCorrection(n) || n.step) continue; // les corrigés apparaissent étape par étape : pas de renvoi
+        if (n.type === "group") visit(n.children);
+        else if (n.type === "text" && !this.refs.titleIds.has(n.id)) texts.push(n);
+      }
+    };
+    visit(page.layers);
+    for (const n of texts) {
+      const g = this.sheet.querySelector(`[data-id="${n.id}"]`);
+      if (!g) continue;
+      // les lignes du cadre, mises bout à bout (un renvoi peut passer à la ligne)
+      const lines = [...g.querySelectorAll<SVGTextElement>("text")];
+      let full = "";
+      const at: { el: SVGTextElement; i: number }[] = [];
+      lines.forEach((el, li) => {
+        const t = el.textContent ?? "";
+        for (let i = 0; i < t.length; i++) at.push({ el, i });
+        full += t;
+        if (li < lines.length - 1) { full += " "; at.push({ el, i: -1 }); }
+      });
+      for (const ref of findRefs(full, new Set(sheets.keys()))) {
+        const target: RefTarget | undefined = ref.kind === "res" ? this.refs.targets.get(ref.key)
+          : { page: sheets.get(ref.key)!, node: null, label: `Feuille ${ref.key}` };
+        if (!target || (target.page === this.pageIndex && !target.node)) continue;
+        // un rectangle par ligne touchée
+        const byLine = new Map<SVGTextElement, DOMRect[]>();
+        for (let c = ref.start; c < ref.end; c++) {
+          const a = at[c];
+          if (!a || a.i < 0) continue;
+          try { (byLine.get(a.el) ?? byLine.set(a.el, []).get(a.el)!).push(a.el.getExtentOfChar(a.i)); } catch { /* caractère non dessiné */ }
+        }
+        const k = this.linkTargets.push(target) - 1;
+        for (const [el, ext] of byLine) {
+          const m = worldInv.multiply(el.getCTM()!);
+          const x0 = Math.min(...ext.map((e) => e.x)), x1 = Math.max(...ext.map((e) => e.x + e.width));
+          const y0 = Math.min(...ext.map((e) => e.y)), y1 = Math.max(...ext.map((e) => e.y + e.height));
+          const pts = [[x0, y0], [x1, y1]].map(([x, y]) => ({ x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f }));
+          const r = document.createElementNS(NS, "rect");
+          const pad = (y1 - y0) * 0.12;
+          r.setAttribute("x", String(Math.min(pts[0].x, pts[1].x) - pad));
+          r.setAttribute("y", String(Math.min(pts[0].y, pts[1].y) - pad));
+          r.setAttribute("width", String(Math.abs(pts[1].x - pts[0].x) + 2 * pad));
+          r.setAttribute("height", String(Math.abs(pts[1].y - pts[0].y) + 2 * pad));
+          r.setAttribute("rx", String(pad * 2));
+          r.setAttribute("class", "reflink");
+          r.dataset.k = String(k);
+          const tt = document.createElementNS(NS, "title");
+          tt.textContent = `Afficher ${target.label}`;
+          r.appendChild(tt);
+          this.linksG.appendChild(r);
+        }
+      }
+    }
+  }
+
+  /** Affiche la ressource visée (son encadré si on le trouve) ; le bouton ↩ ramène à la correction. */
+  follow(t: RefTarget | undefined) {
+    if (!t) return;
+    if (this.textMode) this.closeText();
+    // détours en chaîne (ressource → autre ressource) : on revient toujours au point de la correction
+    this.ret ??= { pageIndex: this.pageIndex, shown: this.shown, view: { ...this.view }, focus: this.focus };
+    this.board = null;
+    this.pageIndex = t.page;
+    this.load();
+    if (t.node) {
+      const title = this.boxOf(t.node);
+      const box = title ? this.blockBoxAt(title.x + title.w / 2, title.y + title.h / 2) : null;
+      // encadré introuvable (titre isolé) : la feuille entière
+      if (box && title && box.w * box.h > title.w * title.h * 4) this.zoomTo(box, 0.04);
+    }
+    this.hint(t.label);
+  }
+
+  goBack() {
+    const r = this.ret;
+    if (!r) return;
+    this.ret = null;
+    this.pageIndex = r.pageIndex;
+    this.pendingShown = r.shown;
+    this.load();
+    this.focus = r.focus;
+    this.setView(r.view);
+    this.renderBar();
+  }
+
+  renderBack() {
+    if (!this.ret) { this.backEl?.remove(); this.backEl = null; return; }
+    if (!this.backEl) {
+      this.backEl = document.createElement("button");
+      this.backEl.className = "pback";
+      this.backEl.onclick = (e) => { e.stopPropagation(); this.goBack(); };
+      this.root.appendChild(this.backEl);
+    }
+    const p = store.doc.pages[this.ret.pageIndex];
+    const total = p ? countSteps(p) : 0;
+    this.backEl.innerHTML = `↩ Revenir à la correction <small>${(p?.name ?? "").replace(/</g, "&lt;")}${total ? ` · étape ${this.ret.shown} / ${total}` : ""}</small>`;
+    this.backEl.title = "Revenir à l'endroit de la correction (→, Échap ou R)";
   }
 
   // ------------------------------------------------------------ vue
@@ -370,6 +493,7 @@ class Presenter {
   // ------------------------------------------------------------ navigation
 
   next() {
+    if (this.ret) { this.goBack(); return; }
     if (this.shown < this.steps.length) {
       this.shown++;
       this.applySteps();
@@ -381,6 +505,7 @@ class Presenter {
   }
 
   prev() {
+    if (this.ret) { this.goBack(); return; }
     if (this.shown > 0) {
       this.shown--;
       this.applySteps();
@@ -603,6 +728,8 @@ class Presenter {
       // glisser vers la gauche : on dézoome d'un cran à chaque fois, autour du point de départ
       if (m.x1 < m.x0 && w * this.view.s > 12) { this.zoomOutAt(m.x0, m.y0); return; }
       if (w * this.view.s > 12 && h * this.view.s > 12) { this.zoomTo({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), w, h }, 0); return; }
+      const link = (m.target as Element).closest?.<SVGElement>(".reflink");
+      if (link && w * this.view.s <= 12) { this.follow(this.linkTargets[+link.dataset.k!]); return; }
       if (this.focus) { this.zoomTo(null); return; }
       const target = this.blockAt(m.target);
       const box = (target && this.boxOf(target)) || this.blockBoxAt(m.x0, m.y0);
@@ -739,7 +866,8 @@ class Presenter {
     const act: Record<string, () => void> = {
       arrowright: () => this.next(), pagedown: () => this.next(), arrowdown: () => this.next(), enter: () => this.next(),
       arrowleft: () => this.prev(), pageup: () => this.prev(), arrowup: () => this.prev(), backspace: () => this.prev(),
-      escape: () => (this.textMode ? this.closeText() : this.focus ? this.zoomTo(null) : this.close()),
+      escape: () => (this.textMode ? this.closeText() : this.ret ? this.goBack() : this.focus ? this.zoomTo(null) : this.close()),
+      r: () => this.ret && this.goBack(),
       t: () => (this.textMode ? this.closeText() : this.openText("step")),
       end: () => this.markEnd(),
       home: () => this.zoomTo(null), "0": () => this.zoomTo(null),
@@ -854,7 +982,9 @@ class Presenter {
       sel.onkeydown = (ev) => ev.stopPropagation();
     }
     this.svg.dataset.tool = this.tool;
-    if (this.board === null && this.page) this.onProgress?.(this.pageIndex, this.shown, this.steps.length);
+    this.renderBack();
+    // pendant un détour vers une ressource, la classe en est toujours au même point de la correction
+    if (this.board === null && this.page && !this.ret) this.onProgress?.(this.pageIndex, this.shown, this.steps.length);
   }
 }
 

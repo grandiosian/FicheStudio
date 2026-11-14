@@ -148,6 +148,9 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   (`.fstudio`, images liées intégrées, dans `data/fichestudio/` du serveur, jamais public) ; « ☁ Ouvrir… » le
   rouvre depuis n'importe quel poste, pour projeter un atelier sans avoir le fichier Affinity sur l'ordinateur
   de la salle. L'avancement des classes suit le nom du document.
+- **Nouvel atelier depuis la Centrale** : `#nouveau` (bouton « ＋ Ajouter un atelier » de la page Ateliers) ouvre un
+  nouveau document « Nouvel atelier » (`#nouveau&nom=…` pour un autre nom) et déplie les modèles de la charte ; marche
+  aussi hors de la Centrale.
 - **Lien depuis la feuille de séance de la Centrale** (même condition) :
   `#presenter=<document>&classe=<cible>&seance=<AAAA-MM-JJ HH:MM>&lancer=presentation|correction` ouvre ce document
   de la Centrale (ou son onglet s'il est déjà ouvert), choisit la classe (elle passe avant le cours en cours) et lance

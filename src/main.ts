@@ -601,6 +601,17 @@ async function start() {
  * Le bouton « Feuille d'appel » ramène à la feuille de séance (seance).
  */
 async function ouvrirDepuisLien() {
+  // « Ajouter un atelier » (page Ateliers de la Centrale) : un nouveau document, et les modèles de la charte pour démarrer
+  if (/^#nouveau(&|$)/.test(location.hash)) {
+    const q = new URLSearchParams(location.hash.slice(1));
+    history.replaceState(null, "", location.pathname + location.search);   // un rechargement ne recrée pas de document
+    if (isPresenting()) stopPresentation();
+    closeTextEditor();
+    store.openTab(newDoc(q.get("nom") || "Nouvel atelier"));
+    status("Nouvel atelier : choisissez un modèle de la charte, ou partez de la page blanche.");
+    setTimeout(() => document.querySelector<HTMLElement>('[data-cmd="templates"]')?.click(), 50);
+    return;
+  }
   if (!centraleApi || !/^#(presenter|classe)=/.test(location.hash)) return;
   const q = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, "", location.pathname + location.search);   // un rechargement ne rouvre pas

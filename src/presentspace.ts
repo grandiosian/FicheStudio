@@ -5,7 +5,7 @@ import { SHEET_KINDS, uid, type Page } from "./model";
 import { countSteps, startPresentation } from "./present";
 import { docBrowser } from "./docbrowser";
 import { DEFAULT_LEVEL_COLORS } from "./model";
-import { centraleApi, chargerCentrale, envoyerAvancement, etatEnvoi, suivreEnvoi, type CentraleCours,
+import { centraleApi, centraleAdmin, toutEnvoyer, chargerCentrale, envoyerAvancement, etatEnvoi, suivreEnvoi, type CentraleCours,
   listerDocuments, chargerDocument, enregistrerDocument, retirerDocument, nomDocumentCentrale } from "./centrale";
 import { assetBytes } from "./assets";
 
@@ -30,6 +30,23 @@ let progress: Progress = viaCentrale ? {} : load(K_PROG, {});
 const excluded: Record<string, string[]> = load(K_SEL, {}); // feuilles décochées, par document
 let current: string = load(K_CUR_, "");
 let centrale: { etat: "chargement" | "ok" | "erreur"; erreur?: string; cours?: CentraleCours | null } = { etat: "chargement" };
+/** Classe demandée par un lien de la Centrale (feuille de séance) : elle passe avant le cours en cours. */
+let classeImposee = "";
+/** Lancement demandé par le lien : « presentation » (feuille en cours, corrigé masqué) ou « correction » (reprise à l'étape). */
+let lancerDemande: "" | "presentation" | "correction" = "";
+/** Séance de la feuille d'appel d'où vient le lien (pour y revenir). */
+let seanceRetour = "";
+export function demandeCentrale(o: { classe?: string; seance?: string; lancer?: string }) {
+  if (o.classe) { classeImposee = o.classe; current = o.classe; save(K_CUR_, current); }
+  seanceRetour = o.seance ?? "";
+  lancerDemande = o.lancer === "presentation" || o.lancer === "correction" ? o.lancer : "";
+}
+/** Retour à la feuille d'appel (feuille de séance) de la classe choisie, sur la Centrale, après l'envoi de l'avancement. */
+async function retourFeuille() {
+  try { await toutEnvoyer(); } catch { /* le keepalive de la fermeture prendra le relais */ }
+  const seance = seanceRetour && current === classeImposee ? `&seance=${encodeURIComponent(seanceRetour)}` : "";
+  location.href = `${centraleAdmin}${current ? `#feuille=${encodeURIComponent(current)}${seance}` : ""}`;
+}
 
 /** Enregistre l'avancement d'une classe pour le document ouvert (Centrale ou navigateur). */
 function persist(classId: string) {
@@ -48,7 +65,8 @@ async function chargerDepuisCentrale() {
     progress = d.avancement as Progress;
     centrale = { etat: "ok", cours: d.cours };
     // le cours en cours est choisi d'office (on peut en changer)
-    if (d.cours?.maintenant && classes.some((c) => c.id === d.cours!.cible)) { current = d.cours.cible; save(K_CUR_, current); }
+    if (classeImposee && classes.some((c) => c.id === classeImposee)) { current = classeImposee; save(K_CUR_, current); }
+    else if (d.cours?.maintenant && classes.some((c) => c.id === d.cours!.cible)) { current = d.cours.cible; save(K_CUR_, current); }
   } catch (e) {
     centrale = { etat: "erreur", erreur: (e as Error).message };
   }
@@ -56,6 +74,16 @@ async function chargerDepuisCentrale() {
 let dual: boolean = load("fichestudio.dualView", false);
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+/** Icônes au trait de la barre du haut (même dessin que la barre de présentation). */
+const PI = {
+  play: "M8 5.5v13l10.5-6.5z",
+  cloudOpen: "M7 18.5h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 6.6 11.2 3.7 3.7 0 0 0 7 18.5z M12 10.5v5.5 M9.6 13.8 12 16.2l2.4-2.4",
+  cloudSave: "M7 18.5h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 6.6 11.2 3.7 3.7 0 0 0 7 18.5z M12 16.2v-5.5 M9.6 12.9 12 10.5l2.4 2.4",
+  folder: "M3.5 6.5h6l2 2h9v10h-17z",
+  appel: "M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11",
+  edit: "M4 20l4-1L19 8l-3-3L5 16z M14 7l3 3",
+};
+const pic = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 /** Le document est repéré par son nom (celui du fichier) : il garde son avancement d'une ouverture à l'autre. */
 const docKey = () => store.doc.name;
 /** Une feuille est repérée par son nom (P01, R02…), stable quand on rouvre le fichier .af. */
@@ -142,15 +170,16 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
 
   root.innerHTML = `
     <header class="ps-head">
-      <span class="ps-title">▶ Présentation</span>
+      <span class="ps-title">${pic(PI.play)}Présentation</span>
       <span class="ps-doc">${esc(doc.name)} · ${doc.pages.length} feuille(s)</span>
       ${syncBadge()}
       <span class="spacer"></span>
       <select class="ps-tabs" title="Documents ouverts">${store.tabs.map((t, i) => `<option value="${i}" ${i === store.activeTab ? "selected" : ""}>${esc((i === store.activeTab ? store.doc : t.doc).name)}</option>`).join("")}</select>
-      ${viaCentrale ? `<button data-k="cdocs" title="Documents rangés sur la Centrale : ouverts depuis n'importe quel poste">☁ Ouvrir…</button>
-      <button data-k="csave" title="Range ce document sur la Centrale (images intégrées) pour le présenter depuis n'importe quel poste">☁ Enregistrer</button>` : ""}
-      <button data-k="browse">📁 Documents…</button>
-      <button data-k="close" title="Revenir à l'édition (Échap)">✕ Retour à l'édition</button>
+      ${viaCentrale ? `<button data-k="cdocs" title="Documents rangés sur la Centrale : ouverts depuis n'importe quel poste">${pic(PI.cloudOpen)}<span>Ouvrir…</span></button>
+      <button data-k="csave" title="Range ce document sur la Centrale (images intégrées) pour le présenter depuis n'importe quel poste">${pic(PI.cloudSave)}<span>Enregistrer</span></button>` : ""}
+      <button data-k="browse" title="Documents de cet ordinateur">${pic(PI.folder)}<span>Documents…</span></button>
+      ${centraleAdmin ? `<button data-k="retour" class="ps-appel" title="Revenir à la feuille d'appel de la classe choisie, sur la Centrale">${pic(PI.appel)}<span>Feuille d'appel</span></button>` : ""}
+      <button data-k="close" title="Revenir à l'édition (Échap)">${pic(PI.edit)}<span>Édition</span></button>
     </header>
     <div class="ps-body">
       <aside class="ps-classes">
@@ -258,7 +287,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     let sessionIndex = -1;
     root.style.display = "none";
     startPresentation(order, {
-      start, shown, label: c?.name, dual,
+      start, shown, label: c?.name, dual, retour: centraleAdmin ? () => void retourFeuille() : undefined,
       onProgress: (pi, sh, total) => {
         if (!c) return;
         const d = docProg(c.id), key = pageKey(store.doc.pages[pi], pi);
@@ -285,6 +314,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
   };
   $<HTMLInputElement>('[data-k="dual"]')!.onchange = (e) => { dual = (e.target as HTMLInputElement).checked; save("fichestudio.dualView", dual); };
   $<HTMLElement>('[data-k="start"]')!.onclick = () => launch(chosen[0]?.i, 0);
+  $<HTMLElement>('[data-k="retour"]')?.addEventListener("click", () => void retourFeuille());
   root.querySelectorAll<HTMLElement>("[data-sdel]").forEach((b) => (b.onclick = () => {
     if (!cls || !dp?.sessions || !confirm("Supprimer cette séance de l'historique ?")) return;
     dp.sessions.splice(+b.dataset.sdel!, 1);
@@ -300,6 +330,13 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     launch(resume.i, resume.shown, pt ? { page: resume.i, x: pt.x, y: pt.y, label: `Reprise · arrêt du ${day(dp!.mark!.at)}` } : undefined);
   });
   root.querySelectorAll<HTMLElement>("[data-from]").forEach((b) => (b.onclick = () => launch(+b.dataset.from!, 0)));
+  // lien de la feuille de séance : on lance dès que la classe et son avancement sont chargés
+  if (lancerDemande && (!viaCentrale || centrale.etat !== "chargement")) {
+    const mode = lancerDemande;
+    lancerDemande = "";
+    if (mode === "correction" && resume) $<HTMLElement>('[data-k="resume"]')?.click();   // reprise à l'étape (et au repère 📍)
+    else launch(resume ? resume.i : chosen[0]?.i, 0);   // présentation : la feuille en cours, corrigé masqué
+  }
 }
 
 // ---------------------------------------------------------------- documents rangés sur la Centrale
@@ -346,11 +383,11 @@ async function saveToCentrale(redraw: () => void) {
   const doc = store.doc;
   const nom = nomDocumentCentrale(doc.name);
   const btn = document.querySelector<HTMLButtonElement>('[data-k="csave"]');
-  const label = btn?.textContent ?? "";
+  const label = btn?.querySelector("span")?.textContent ?? btn?.textContent ?? "";
   try {
     const existants = await listerDocuments();
     if (existants.some((d) => d.nom === nom) && !confirm(`« ${nom} » est déjà sur la Centrale. Le remplacer par la version ouverte ?`)) return;
-    if (btn) { btn.disabled = true; btn.textContent = "☁ Envoi…"; }
+    if (btn) { btn.disabled = true; const sp = btn.querySelector("span"); if (sp) sp.textContent = "Envoi…"; else btn.textContent = "☁ Envoi…"; }
     const copie = JSON.parse(JSON.stringify(doc)) as typeof doc;
     const manquantes: string[] = [];
     for (const [key, a] of Object.entries(copie.assets)) {
@@ -368,7 +405,7 @@ async function saveToCentrale(redraw: () => void) {
   } catch (e) {
     alert(`Enregistrement sur la Centrale impossible : ${(e as Error).message}`);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = label; }
+    if (btn) { btn.disabled = false; const sp = btn.querySelector("span"); if (sp) sp.textContent = label; else btn.textContent = label; }
     redraw();
   }
 }

@@ -789,3 +789,22 @@ details.psec > summary:hover { color: var(--text); }
 .img-list .acts { display: flex; gap: 4px; }
 .img-manager .im-dirrow { display: flex; gap: 6px; align-items: center; }
 .img-manager .im-dirrow input { flex: 1; min-width: 0; }
+
+/* Barre de présentation : chaque icône en haut de son bouton, alignées sur une même ligne ; le libellé dessous,
+   sur deux lignes s'il est long (« Fin de cours », « Feuille d'appel ») au lieu de déborder sur le bouton voisin. */
+#present .pbar button.big { height: auto; min-height: 56px; align-self: stretch; justify-content: flex-start; padding: 6px 2px 5px; white-space: normal; }
+#present .pbar button.big svg { flex: none; }
+#present .pbar button.big span { white-space: normal; text-align: center; line-height: 1.1; max-width: 100%; }
+
+/* Barre du haut de l'espace Présentation : icônes au trait, libellé à côté */
+.ps-title { display: inline-flex; align-items: center; gap: 6px; }
+.ps-title svg { width: 16px; height: 16px; fill: currentColor; stroke: none; }
+.ps-head button { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 9px; white-space: nowrap; }
+.ps-head button svg { flex: none; width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ps-head button.ps-appel { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.ps-head select { height: 34px; border-radius: 9px; }
+@media (max-width: 1000px) { .ps-head button span { display: none; } .ps-head button { padding: 0 9px; } .ps-head button.ps-appel span { display: inline; } }
+.ps-head { flex-wrap: wrap; row-gap: 8px; }
+.ps-head .ps-doc { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-head .spacer { display: none; }
+.ps-head select { min-width: 150px; }

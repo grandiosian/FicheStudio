@@ -36,7 +36,7 @@ const IC = {
   zoom: "M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13z M15.5 15.5 20.5 20.5 M10.5 7.5v6 M7.5 10.5h6",
   board: "M3.5 4.5h17v12h-17z M8 21h8 M12 16.5V21",
   proj: "M3 8.5h18v8H3z M7 16.5 5.5 20 M17 16.5l1.5 3.5 M15 12.5m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0 M6 11.5h4", fs: "M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5", quit: "M6 6l12 12 M18 6 6 18",
-  plus: "M12 5v14 M5 12h14",
+  plus: "M12 5v14 M5 12h14", retour: "M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11",
   flag: "M6 21V4 M6 4h11l-2 4 2 4H6",
   pin: "M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 1 1 13 0c0 4.8-6.5 11-6.5 11z M12 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z",
   text: "M4 7V5h10v2 M9 5v14 M7 19h4 M14 12v-1.5h7V12 M17.5 10.5V19 M16 19h3", minus: "M5 12h14", fit: "M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5 M9 9h6v6H9z", auto: "M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13z M15.5 15.5 20.5 20.5 M8 10.5l2 2 3.5-4",
@@ -69,6 +69,8 @@ class Presenter {
   pendingShown: number | null = null;
   onProgress?: (pageIndex: number, shown: number, total: number) => void;
   onClose?: () => void;
+  /** Retour à la feuille de séance de la Centrale (bouton « Feuille d'appel »). */
+  retour?: () => void;
   /** Marqueur « fin de cours » de la classe (espace Présentation) ; renvoie le message à afficher. */
   onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number }) => string;
   marked = false;
@@ -1010,6 +1012,7 @@ class Presenter {
       ${this.onMark ? `<button class="big mark ${this.marked ? "done" : ""}" data-a="mark" title="Fin de cours : enregistrer où la classe ${this.label.replace(/"/g, "")} s'est arrêtée (Fin)">${ic(IC.flag)}<span>${this.marked ? "Marqué" : "Fin de cours"}</span></button>` : ""}
       <button class="big ${this.proj?.alive ? "open" : ""}" data-a="proj" title="Double vue : interface sur cet écran, projection plein écran sur le vidéoprojecteur">${ic(IC.proj)}<span>Projeter</span></button>
       <button class="big" data-a="fs" title="Plein écran (F)">${ic(IC.fs)}<span>Écran</span></button>
+      ${this.retour ? `<button class="big" data-a="retour" title="Revenir à la feuille d'appel de la Centrale (l'avancement de la classe est enregistré)">${ic(IC.retour)}<span>Feuille d'appel</span></button>` : ""}
       <button class="big" data-a="quit" title="Quitter (Échap)">${ic(IC.quit)}<span>Quitter</span></button>`;
     this.bar.querySelectorAll<HTMLElement>("button").forEach((b) => (b.onclick = (e) => {
       e.stopPropagation();
@@ -1035,6 +1038,7 @@ class Presenter {
         proj: () => (this.proj?.alive ? this.stopProjection() : this.openProjection()),
         fs: () => (document.fullscreenElement ? document.exitFullscreen() : this.root.requestFullscreen()).catch(() => {}),
         quit: () => this.close(),
+        retour: () => this.retour?.(),
       } as Record<string, () => void>)[a ?? ""]?.();
     }));
     const sel = this.bar.querySelector<HTMLSelectElement>(".zsel");
@@ -1082,6 +1086,8 @@ export interface PresentOptions {
   /** Repère du cours précédent, affiché (et cadré) à la reprise. */
   pin?: { page: number; x: number; y: number; label: string };
   dual?: boolean;   // double vue : ouvrir aussi la fenêtre de projection
+  /** FicheStudio ouvert depuis la Centrale : bouton « Feuille d'appel » (retour à la feuille de séance). */
+  retour?: () => void;
 }
 
 export function startPresentation(pages?: number[], opts: PresentOptions = {}) {
@@ -1098,6 +1104,7 @@ export function startPresentation(pages?: number[], opts: PresentOptions = {}) {
   current.onClose = opts.onClose;
   current.onMark = opts.onMark;
   current.pin = opts.pin ?? null;
+  current.retour = opts.retour;
   const presenter = current;
   current.open();
   if (opts.pin) requestAnimationFrame(() => presenter.showPin());
@@ -1105,6 +1112,8 @@ export function startPresentation(pages?: number[], opts: PresentOptions = {}) {
 }
 
 export const isPresenting = () => !!current;
+/** Quitte la présentation en cours (comme « Quitter ») : un lien de la Centrale ouvre une autre classe. */
+export function stopPresentation() { current?.close(); }
 
 /** Nombre d'étapes de correction d'une feuille (sans la présenter) : contenu des « _Corr »
  *  et objets marqués « étape », comme au chargement d'une feuille en présentation. */

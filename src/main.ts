@@ -4,8 +4,9 @@ import { enterIsolation, exitIsolation, isIsolated } from "./canvas";
 import { initCanvas, setTool, zoomBy, zoomToFit, zoomToWidth, view, cancelInteraction, deleteActiveAnchor, insertImageNode, isTyping, finishPen } from "./canvas";
 import { loadCharteInit, prefsDialog } from "./prefs";
 import { hasCharteMasters, updateCharteMasters } from "./charte";
-import { openPresentSpace, initPresentSpace } from "./presentspace";
+import { openPresentSpace, initPresentSpace, demandeCentrale } from "./presentspace";
 import { docBrowser } from "./docbrowser";
+import { centraleApi, chargerDocument, nomDocumentCentrale } from "./centrale";
 import { reimportAffinity } from "./reimport";
 import { imageManager } from "./imagemanager";
 import { showCharte, checkCharteDialog, variantDialog } from "./charteview";
@@ -22,7 +23,7 @@ import type { PdfOptions } from "./io/pdfexport";
 const pdfModule = () => import("./io/pdfexport");
 import { canLinkFiles, linkLocalImage, linkUrlImage, resolveLinks } from "./assets";
 import { layerPagesDialog } from "./layerpages";
-import { startPresentation, isPresenting } from "./present";
+import { startPresentation, isPresenting, stopPresentation } from "./present";
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -588,6 +589,35 @@ async function start() {
   });
   checkLinks();
   status("Prêt. Glissez un fichier .af ou une image sur la page.");
+  void ouvrirDepuisLien();
+  window.addEventListener("hashchange", () => void ouvrirDepuisLien());   // FicheStudio déjà ouvert dans cet onglet
+}
+
+/**
+ * Lien de la feuille de séance de la Centrale : #presenter=<document de la Centrale>&classe=<cible>&seance=<AAAA-MM-JJ HH:MM>
+ * [&lancer=presentation|correction] ouvre le document (onglet déjà ouvert, sinon depuis la Centrale), choisit la classe,
+ * ouvre l'espace Présentation et lance : « presentation » sur la feuille où la classe en est (corrigé masqué),
+ * « correction » à l'étape où elle s'était arrêtée. #classe=<cible> seul : l'espace, classe choisie.
+ * Le bouton « Feuille d'appel » ramène à la feuille de séance (seance).
+ */
+async function ouvrirDepuisLien() {
+  if (!centraleApi || !/^#(presenter|classe)=/.test(location.hash)) return;
+  const q = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, "", location.pathname + location.search);   // un rechargement ne rouvre pas
+  const nom = q.get("presenter") ?? "", classe = q.get("classe") ?? "";
+  if (isPresenting()) stopPresentation();
+  demandeCentrale({ classe, seance: q.get("seance") ?? "", lancer: q.get("lancer") ?? "" });
+  if (nom) {
+    const ouvert = store.tabs.findIndex((t, i) => nomDocumentCentrale((i === store.activeTab ? store.doc : t.doc).name) === nom);
+    if (ouvert >= 0) store.switchTab(ouvert);
+    else {
+      try { await openFile(await chargerDocument(nom)); }
+      catch (e) { status(`Document « ${nom} » : ${(e as Error).message}`); }
+    }
+  }
+  closeTextEditor();
+  store.editingMaster = null;
+  openPresentSpace();
 }
 
 start();

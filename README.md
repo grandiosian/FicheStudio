@@ -148,6 +148,14 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   (`.fstudio`, images liées intégrées, dans `data/fichestudio/` du serveur, jamais public) ; « ☁ Ouvrir… » le
   rouvre depuis n'importe quel poste, pour projeter un atelier sans avoir le fichier Affinity sur l'ordinateur
   de la salle. L'avancement des classes suit le nom du document.
+- **Lien depuis la feuille de séance de la Centrale** (même condition) :
+  `#presenter=<document>&classe=<cible>&seance=<AAAA-MM-JJ HH:MM>&lancer=presentation|correction` ouvre ce document
+  de la Centrale (ou son onglet s'il est déjà ouvert), choisit la classe (elle passe avant le cours en cours) et lance
+  la présentation : `presentation` sur la feuille où la classe en est, corrigé masqué ; `correction` à l'étape où elle
+  s'était arrêtée (et au repère 📍) ; sans avancement, depuis la première feuille. `#classe=<cible>` seul ouvre l'espace
+  sur la classe. Marche aussi quand FicheStudio est déjà ouvert dans l'onglet (la présentation en cours est quittée).
+  **↩ Feuille d'appel** (barre de présentation et espace Présentation) envoie l'avancement puis revient à la feuille de
+  séance de la classe sur la Centrale.
 - **Œil et cadenas** : zones cliquables de 24 px ; appuyer puis glisser sur d'autres lignes masque,
   affiche ou verrouille plusieurs calques d'un coup (une seule annulation).
 - **Couleurs en direct** : la page suit le sélecteur de couleur pendant qu'on le fait glisser ;

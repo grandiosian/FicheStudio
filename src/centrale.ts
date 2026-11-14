@@ -13,6 +13,8 @@ export interface CentraleDonnees { classes: CentraleClasse[]; cours: CentraleCou
 const m = location.pathname.match(/^(.*)\/admin\/appli\.php\//);
 /** Adresse de l'API, ou null quand FicheStudio n'est pas servi par une Centrale. */
 export const centraleApi: string | null = m ? `${m[1]}/api/fichestudio.php` : null;
+/** Espace enseignant de la Centrale (retour à la feuille d'appel), ou null hors Centrale. */
+export const centraleAdmin: string | null = m ? `${m[1]}/admin/` : null;
 
 export async function chargerCentrale(): Promise<CentraleDonnees> {
   const r = await fetch(centraleApi!, { cache: "no-store", credentials: "same-origin" });
@@ -58,6 +60,9 @@ async function vider(keepalive = false) {
   }
   changer(enAttente.size ? "attente" : "ok");
 }
+
+/** Envoie tout de suite l'avancement en attente (avant de quitter FicheStudio pour la Centrale). */
+export async function toutEnvoyer() { if (enAttente.size) await vider(); }
 
 // fermeture de l'onglet : dernier envoi (keepalive survit à la page)
 if (centraleApi) window.addEventListener("pagehide", () => { if (enAttente.size) void vider(true); });

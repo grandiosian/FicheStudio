@@ -121,11 +121,15 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   un chronomètre, et les boutons **Écran noir** (N) et **Figer** (K). Les flèches et Espace
   fonctionnent depuis les deux fenêtres. Autoriser les fenêtres surgissantes pour le site.
 - **Repère de fin de cours** (bouton « Repère » de la barre de présentation, touche J) : un clic sur la feuille pose
-  une épingle orange et une ligne pointillée à l'endroit où la classe s'arrête ; c'est aussi la fin de cours 🏁
-  (feuille, étape et point enregistrés pour la classe). Au cours suivant, « Reprendre » rouvre la feuille à la même
-  étape, le repère affiché (aussi au vidéoprojecteur) et la vue cadrée pleine largeur dessus. Le reposer pendant le
-  même cours le déplace. Un repère déjà posé (ou repris) se **glisse** pour le déplacer et, d'un **clic**, s'édite :
-  texte de l'étiquette (gardé pour la reprise), suppression.
+  une épingle orange datée (« Fin de cours 17/11 ») et une ligne pointillée à l'endroit où la classe s'arrête : c'est la
+  fin du cours (feuille, étape et point enregistrés pour la classe). Chaque cours garde son repère : ceux des cours
+  précédents restent affichés, plus pâles (« Fin de cours 11/09 », « Fin de cours 15/09 »…). Le reposer pendant le même
+  cours déplace celui du cours. Un repère se **glisse** pour le déplacer et, d'un **clic**, s'édite : texte de
+  l'étiquette, suppression. Au cours suivant, « Reprendre » rouvre la feuille au dernier repère (vue cadrée dessus) ;
+  si la classe a avancé depuis sans repère, il reprend là où elle en était.
+- **Avancement de la correction** : pour chaque classe, l'étape affichée de chaque feuille est enregistrée (sur la
+  Centrale si FicheStudio y est ouvert) ; en revenant sur une feuille, ses calques de correction déjà montrés à la classe
+  réapparaissent.
 - **Renvois cliquables en présentation** : « (aide : ressource 9) », « ressources 9 et 10 », « ressource SEGPA 2 »
   ou un nom de feuille (« R09 », « E01 ») sont encadrés en bleu sur l'écran du professeur (jamais projetés). Un clic
   affiche la ressource : sa feuille, cadrée sur l'encadré titré « Ressource 9 » quand il existe (R04 contient les

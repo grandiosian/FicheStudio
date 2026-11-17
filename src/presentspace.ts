@@ -2,7 +2,7 @@
 // de la correction pour chaque classe (on reprend là où la classe s'était arrêtée).
 import { store } from "./store";
 import { SHEET_KINDS, uid, type Page } from "./model";
-import { countSteps, startPresentation } from "./present";
+import { countSteps, startPresentation, pinDefaultLabel, type PresPin } from "./present";
 import { docBrowser } from "./docbrowser";
 import { DEFAULT_LEVEL_COLORS } from "./model";
 import { centraleApi, centraleAdmin, toutEnvoyer, chargerCentrale, envoyerAvancement, etatEnvoi, suivreEnvoi, type CentraleCours,
@@ -11,11 +11,15 @@ import { assetBytes } from "./assets";
 
 /** sub : groupe (demi-classe) d'une classe de la Centrale ; etab : établissement (Centrale). */
 export interface Classe { id: string; name: string; level: string; sub?: boolean; etab?: string }
-interface PageProg { shown: number; total: number; at: number }
-interface Pos { page: string; shown: number; total?: number; pt?: { x: number; y: number; t?: string } }
+/** shown : étape la plus loin atteinte ; vu : étape affichée en dernier (reprise des calques de correction). */
+interface PageProg { shown: number; vu?: number; total: number; at: number }
+interface Pos { page: string; shown: number; total?: number; pt?: { x: number; y: number; t?: string }; at?: number; session?: number }
+/** Repère de fin de cours (épingle datée) ; at : date de pose, session : présentation où il a été posé. */
+interface Repere { page: string; x: number; y: number; t?: string; at: number; shown: number; total: number; session?: number }
 /** Une séance : de la position de départ jusqu'au marqueur « fin de cours ». */
 interface Session { at: number; from: Pos | null; to: Pos }
-interface DocProg { last?: Pos; mark?: Pos & { at: number }; sessions?: Session[]; pages: Record<string, PageProg> }
+/** mark : le dernier repère (compatibilité, lu par la Centrale) ; reperes : tous les repères, du plus ancien au plus récent. */
+interface DocProg { last?: Pos; mark?: Pos & { at: number }; reperes?: Repere[]; sessions?: Session[]; pages: Record<string, PageProg> }
 type Progress = Record<string, Record<string, DocProg>>; // classe -> document -> avancement
 
 const K_CLASSES = "fichestudio.classes", K_PROG = "fichestudio.progress", K_SEL = "fichestudio.presentSel", K_CUR = "fichestudio.presentClass";
@@ -152,10 +156,12 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     return Math.round((100 * list.filter((x) => statusOf(classId, x.p, x.i).st === "done").length) / list.length);
   };
   const dp = cls ? progress[cls.id]?.[docKey()] : undefined;
-  // reprise : au marqueur « fin de cours » s'il existe, sinon à la dernière position vue
+  // reprise : au dernier repère 📍 s'il a été posé au dernier cours ; sinon là où la classe en était (dernière position vue),
+  // pour ne pas revenir en arrière quand la classe a avancé sans repère
   const markIdx = dp?.mark ? pages.findIndex((x) => x.key === dp.mark!.page) : -1;
   const lastIdx = dp?.last ? pages.findIndex((x) => x.key === dp.last!.page) : -1;
-  const resume = cls && markIdx >= 0 ? { i: markIdx, shown: dp!.mark!.shown, mark: true }
+  const markFirst = markIdx >= 0 && (lastIdx < 0 || !dp!.last!.session || dp!.mark!.session === dp!.last!.session);
+  const resume = cls && markFirst ? { i: markIdx, shown: dp!.mark!.shown, mark: true }
     : cls && lastIdx >= 0 ? { i: lastIdx, shown: dp!.last!.shown, mark: false } : null;
   const day = (t: number) => new Date(t).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" });
   const coursTag = (id: string) => {
@@ -198,7 +204,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
       </aside>
       <main class="ps-main">
         <div class="ps-actions">
-          ${resume ? `<button class="primary-inline big" data-k="resume">▶ Reprendre ${esc(cls!.name)}${resume.mark ? ` au 🏁 du ${day(dp!.mark!.at)}` : ""} — ${esc(pages[resume.i].p.name)}, étape ${resume.shown}${(() => { const t = statusOf(cls!.id, pages[resume.i].p, resume.i).total; return t ? ` / ${t}` : ""; })()}</button>` : ""}
+          ${resume ? `<button class="primary-inline big" data-k="resume">▶ Reprendre ${esc(cls!.name)}${resume.mark ? ` au 📍 du ${day(dp!.mark!.at)}` : ""} — ${esc(pages[resume.i].p.name)}, étape ${resume.shown}${(() => { const t = statusOf(cls!.id, pages[resume.i].p, resume.i).total; return t ? ` / ${t}` : ""; })()}</button>` : ""}
           <button class="${resume ? "" : "primary-inline big"}" data-k="start" ${chosen.length ? "" : "disabled"}>▶ ${resume ? "Depuis le début" : `Présenter${cls ? ` à ${esc(cls.name)}` : ""}`} (${chosen.length} feuille(s))</button>
           ${cls ? `<button data-k="reset" title="Effacer l'avancement de cette classe pour ce document">↺ Remettre à zéro</button>` : ""}
           <label class="ps-dual" title="Interface sur cet écran, projection plein écran dans une seconde fenêtre (sur le vidéoprojecteur)"><input type="checkbox" data-k="dual" ${dual ? "checked" : ""}> 🖥 Double vue (vidéoprojecteur)</label>
@@ -208,7 +214,9 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
           <tbody>${pages.map(({ p, i, key }) => {
             const s = cls ? statusOf(cls.id, p, i) : { st: "todo" as Status, shown: 0, total: countSteps(p) };
             const w = s.total ? Math.round((100 * Math.min(s.shown, s.total)) / s.total) : s.st === "done" ? 100 : 0;
-            const flag = dp?.mark && dp.mark.page === key ? `<span class="ps-flag" title="Fin du dernier cours de ${esc(cls!.name)}">🏁 fin du cours du ${day(dp.mark.at)} · étape ${dp.mark.shown}${dp.mark.pt ? " · 📍 repère" : ""}</span>` : "";
+            const reps = (dp?.reperes ?? []).filter((r) => r.page === key);
+            const flag = reps.map((r) => `<span class="ps-flag" title="Repère de fin de cours de ${esc(cls!.name)}, posé le ${day(r.at)} à l'étape ${r.shown}${r.total ? ` / ${r.total}` : ""}">📍 ${esc(r.t || pinDefaultLabel(r.at))}</span>`).join(" ")
+              || (dp?.mark && dp.mark.page === key ? `<span class="ps-flag" title="Fin du dernier cours de ${esc(cls!.name)}">🏁 fin du cours du ${day(dp.mark.at)} · étape ${dp.mark.shown}</span>` : "");
             return `<tr class="${ex.has(key) ? "off" : ""} ${resume?.i === i ? "last" : ""}">
               <td><input type="checkbox" data-sel="${esc(key)}" ${ex.has(key) ? "" : "checked"}></td>
               <td><span class="kind-tag k-${p.kind ?? "fiche"}">${SHEET_KINDS[p.kind ?? "fiche"].prefix}</span> ${esc(p.name)} ${flag}</td>
@@ -217,7 +225,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
           }).join("")}</tbody></table>
         ${cls ? `<h3 class="ps-sub">Séances de ${esc(cls.name)} · ${esc(doc.name)}</h3>
         ${dp?.sessions?.length ? `<ol class="ps-sessions">${dp.sessions.map((se, k) => `<li><b>Séance ${k + 1}</b><span class="d">${day(se.at)} ${new Date(se.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span><span class="r">${posLabel(se.from)} → <b>🏁 ${posLabel(se.to)}</b></span><button data-sdel="${k}" title="Supprimer cette séance">✕</button></li>`).join("")}</ol>`
-          : `<p class="hint">Pendant la présentation, le bouton <b>🏁 Fin de cours</b> (ou la touche Fin) enregistre où la classe s'est arrêtée : la prochaine séance reprendra à cet endroit, et la séance s'ajoute ici.</p>`}` : ""}
+          : `<p class="hint">Pendant la présentation, l'outil <b>📍 Repère</b> (touche J) marque la fin du cours : cliquez là où la classe s'arrête. Chaque cours garde son repère daté, la prochaine séance reprend au dernier, et la séance s'ajoute ici.</p>`}` : ""}
         ${matrixClasses.length ? `<h3 class="ps-sub">${viaCentrale ? "Classes qui ont commencé" : "Toutes les classes"} · ${esc(doc.name)}</h3>
         <div class="ps-matrix" style="grid-template-columns: 120px repeat(${chosen.length}, minmax(26px, 1fr)) 52px">
           <span></span>${chosen.map((x) => `<span class="mh" title="${esc(x.p.name)}">${esc(x.p.name)}</span>`).join("")}<span class="mh">Total</span>
@@ -277,7 +285,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     persist(cls.id); redraw();
   });
 
-  const launch = (start?: number, shown?: number, pin?: { page: number; x: number; y: number; label: string; custom?: boolean }) => {
+  const launch = (start?: number, shown?: number, focusPin?: number) => {
     const order = chosen.map((x) => x.i);
     if (start !== undefined && !order.includes(start)) order.push(start), order.sort((a, b) => a - b);
     if (!order.length) return;
@@ -285,6 +293,14 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     // point de départ de la séance (pour l'historique « de … à … »)
     const startPos: Pos | null = start !== undefined ? { page: pageKey(store.doc.pages[start], start), shown: shown ?? 0 } : null;
     let sessionIndex = -1;
+    const session = Date.now();   // cette présentation : la reprise sait si le dernier repère est du dernier cours
+    const idx = new Map(store.doc.pages.map((p, i) => [pageKey(p, i), i]));
+    // repères de la classe (les anciens fichiers n'ont que le marqueur 🏁 avec son point 📍)
+    const dc = c ? progress[c.id]?.[docKey()] : undefined;
+    const reperes: Repere[] = dc?.reperes ?? (dc?.mark?.pt ? [{ page: dc.mark.page, x: dc.mark.pt.x, y: dc.mark.pt.y, t: dc.mark.pt.t, at: dc.mark.at,
+      shown: dc.mark.shown, total: dc.mark.total ?? 0, session: dc.mark.session }] : []);
+    const pins: PresPin[] = reperes.filter((r) => idx.has(r.page)).map((r) => ({ id: r.at, page: idx.get(r.page)!, x: r.x, y: r.y,
+      label: r.t || pinDefaultLabel(r.at), custom: !!r.t, shown: r.shown, total: r.total, session: r.session }));
     root.style.display = "none";
     startPresentation(order, {
       start, shown, label: c?.name, dual, retour: centraleAdmin ? () => void retourFeuille() : undefined,
@@ -293,21 +309,36 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
         const d = docProg(c.id), key = pageKey(store.doc.pages[pi], pi);
         const prev = d.pages[key];
         // l'avancement retient l'étape la plus loin atteinte ; la reprise, la position exacte
-        d.pages[key] = { shown: Math.max(prev?.shown ?? 0, sh), total, at: Date.now() };
-        d.last = { page: key, shown: sh };
+        d.pages[key] = { shown: Math.max(prev?.shown ?? 0, sh), vu: sh, total, at: Date.now() };
+        d.last = { page: key, shown: sh, total, at: Date.now(), session };
         persist(c.id);
       },
-      pin: pin ?? undefined,
-      onMark: c ? (pi, sh, total, pt) => {
-        const d = docProg(c.id), key = pageKey(store.doc.pages[pi], pi);
-        const to: Pos = { page: key, shown: sh, total, ...(pt ? { pt } : {}) };
-        d.mark = { ...to, at: Date.now() };
-        d.sessions ??= [];
-        // un second marquage pendant la même présentation corrige la séance au lieu d'en ajouter une
-        if (sessionIndex >= 0 && d.sessions[sessionIndex]) d.sessions[sessionIndex] = { ...d.sessions[sessionIndex], to, at: Date.now() };
-        else { d.sessions.push({ at: Date.now(), from: startPos, to }); sessionIndex = d.sessions.length - 1; }
+      // calques de correction déjà affichés à cette classe sur la feuille
+      savedShown: c ? (pi) => { const pg = progress[c.id]?.[docKey()]?.pages[pageKey(store.doc.pages[pi], pi)]; return pg ? pg.vu ?? pg.shown : undefined; } : undefined,
+      pins, focusPin,
+      onPins: c ? (list, changed) => {
+        const d = docProg(c.id);
+        const keep = new Map((d.reperes ?? []).map((r) => [r.at, r]));   // repères des feuilles hors de cette présentation
+        const own = new Set(list.map((p) => p.id));
+        d.reperes = [...(d.reperes ?? []).filter((r) => !own.has(r.at) && !idx.has(r.page)),
+          ...list.map((p): Repere => ({ page: pageKey(store.doc.pages[p.page], p.page), x: Math.round(p.x), y: Math.round(p.y),
+            ...(p.custom ? { t: p.label } : {}), at: p.id, shown: p.shown ?? 0, total: p.total ?? 0,
+            ...(p.mine ? { session } : p.session ?? keep.get(p.id)?.session ? { session: p.session ?? keep.get(p.id)?.session } : {}) }))]
+          .sort((a, b) => a.at - b.at);
+        // le dernier repère est la fin de cours (reprise, Centrale)
+        const lastR = d.reperes[d.reperes.length - 1];
+        if (lastR) d.mark = { page: lastR.page, shown: lastR.shown, total: lastR.total, pt: { x: lastR.x, y: lastR.y, ...(lastR.t ? { t: lastR.t } : {}) }, at: lastR.at, ...(lastR.session ? { session: lastR.session } : {}) };
+        else delete d.mark;
+        // séance : le repère de ce cours en est la fin (un second repère du même cours corrige la séance)
+        if (changed?.mine) {
+          const to: Pos = { page: pageKey(store.doc.pages[changed.page], changed.page), shown: changed.shown ?? 0, total: changed.total, pt: { x: Math.round(changed.x), y: Math.round(changed.y) } };
+          d.sessions ??= [];
+          if (sessionIndex >= 0 && d.sessions[sessionIndex]) d.sessions[sessionIndex] = { ...d.sessions[sessionIndex], to, at: Date.now() };
+          else { d.sessions.push({ at: Date.now(), from: startPos, to }); sessionIndex = d.sessions.length - 1; }
+        }
         persist(c.id);
-        return `🏁 Fin de cours enregistrée pour ${c.name} : ${store.doc.pages[pi].name}, étape ${sh}${total ? ` / ${total}` : ""}${pt ? ", au repère 📍" : ""}. La prochaine séance reprendra ici.`;
+        if (!changed) return `Repère supprimé pour ${c.name}.`;
+        return `📍 « ${changed.label} » enregistré pour ${c.name} : ${store.doc.pages[changed.page].name}, étape ${changed.shown ?? 0}${changed.total ? ` / ${changed.total}` : ""}. La prochaine séance reprendra au dernier repère.`;
       } : undefined,
       onClose: () => { root.style.display = ""; redraw(); },
     });
@@ -318,18 +349,19 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
   root.querySelectorAll<HTMLElement>("[data-sdel]").forEach((b) => (b.onclick = () => {
     if (!cls || !dp?.sessions || !confirm("Supprimer cette séance de l'historique ?")) return;
     dp.sessions.splice(+b.dataset.sdel!, 1);
-    // le marqueur suit la dernière séance restante
-    const lastS = dp.sessions[dp.sessions.length - 1];
-    if (lastS) dp.mark = { ...lastS.to, at: lastS.at }; else delete dp.mark;
+    // sans repères (anciens fichiers), le marqueur suit la dernière séance restante
+    if (!dp.reperes) {
+      const lastS = dp.sessions[dp.sessions.length - 1];
+      if (lastS) dp.mark = { ...lastS.to, at: lastS.at }; else delete dp.mark;
+    }
     persist(cls.id); redraw();
   }));
-  // reprise au 🏁 : le repère posé au cours précédent est réaffiché sur la feuille
+  // reprise : au dernier repère 📍 (cadré), ou là où la classe en était ; tous les repères restent affichés sur leurs feuilles
   $<HTMLElement>('[data-k="resume"]')?.addEventListener("click", () => {
     if (!resume) return;
-    const pt = resume.mark ? dp?.mark?.pt : undefined;
-    launch(resume.i, resume.shown, pt ? { page: resume.i, x: pt.x, y: pt.y, label: pt.t || `Reprise · arrêt du ${day(dp!.mark!.at)}`, custom: !!pt.t } : undefined);
+    launch(resume.i, resume.shown, resume.mark && dp?.mark?.pt ? dp.mark.at : undefined);
   });
-  root.querySelectorAll<HTMLElement>("[data-from]").forEach((b) => (b.onclick = () => launch(+b.dataset.from!, 0)));
+  root.querySelectorAll<HTMLElement>("[data-from]").forEach((b) => (b.onclick = () => launch(+b.dataset.from!)));
   // lien de la feuille de séance : on lance dès que la classe et son avancement sont chargés
   if (lancerDemande && (!viaCentrale || centrale.etat !== "chargement")) {
     const mode = lancerDemande;

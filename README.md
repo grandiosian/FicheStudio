@@ -124,7 +124,8 @@ Tout se passe dans le navigateur : aucun fichier n'est envoyé sur un serveur.
   une épingle orange et une ligne pointillée à l'endroit où la classe s'arrête ; c'est aussi la fin de cours 🏁
   (feuille, étape et point enregistrés pour la classe). Au cours suivant, « Reprendre » rouvre la feuille à la même
   étape, le repère affiché (aussi au vidéoprojecteur) et la vue cadrée pleine largeur dessus. Le reposer pendant le
-  même cours le déplace.
+  même cours le déplace. Un repère déjà posé (ou repris) se **glisse** pour le déplacer et, d'un **clic**, s'édite :
+  texte de l'étiquette (gardé pour la reprise), suppression.
 - **Renvois cliquables en présentation** : « (aide : ressource 9) », « ressources 9 et 10 », « ressource SEGPA 2 »
   ou un nom de feuille (« R09 », « E01 ») sont encadrés en bleu sur l'écran du professeur (jamais projetés). Un clic
   affiche la ressource : sa feuille, cadrée sur l'encadré titré « Ressource 9 » quand il existe (R04 contient les

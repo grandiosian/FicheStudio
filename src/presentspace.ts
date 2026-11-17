@@ -12,7 +12,7 @@ import { assetBytes } from "./assets";
 /** sub : groupe (demi-classe) d'une classe de la Centrale ; etab : établissement (Centrale). */
 export interface Classe { id: string; name: string; level: string; sub?: boolean; etab?: string }
 interface PageProg { shown: number; total: number; at: number }
-interface Pos { page: string; shown: number; total?: number; pt?: { x: number; y: number } }
+interface Pos { page: string; shown: number; total?: number; pt?: { x: number; y: number; t?: string } }
 /** Une séance : de la position de départ jusqu'au marqueur « fin de cours ». */
 interface Session { at: number; from: Pos | null; to: Pos }
 interface DocProg { last?: Pos; mark?: Pos & { at: number }; sessions?: Session[]; pages: Record<string, PageProg> }
@@ -277,7 +277,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
     persist(cls.id); redraw();
   });
 
-  const launch = (start?: number, shown?: number, pin?: { page: number; x: number; y: number; label: string }) => {
+  const launch = (start?: number, shown?: number, pin?: { page: number; x: number; y: number; label: string; custom?: boolean }) => {
     const order = chosen.map((x) => x.i);
     if (start !== undefined && !order.includes(start)) order.push(start), order.sort((a, b) => a - b);
     if (!order.length) return;
@@ -327,7 +327,7 @@ function render(root: HTMLElement, close: () => void, redraw: () => void) {
   $<HTMLElement>('[data-k="resume"]')?.addEventListener("click", () => {
     if (!resume) return;
     const pt = resume.mark ? dp?.mark?.pt : undefined;
-    launch(resume.i, resume.shown, pt ? { page: resume.i, x: pt.x, y: pt.y, label: `Reprise · arrêt du ${day(dp!.mark!.at)}` } : undefined);
+    launch(resume.i, resume.shown, pt ? { page: resume.i, x: pt.x, y: pt.y, label: pt.t || `Reprise · arrêt du ${day(dp!.mark!.at)}`, custom: !!pt.t } : undefined);
   });
   root.querySelectorAll<HTMLElement>("[data-from]").forEach((b) => (b.onclick = () => launch(+b.dataset.from!, 0)));
   // lien de la feuille de séance : on lance dès que la classe et son avancement sont chargés

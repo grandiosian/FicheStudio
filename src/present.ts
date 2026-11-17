@@ -72,13 +72,16 @@ class Presenter {
   /** Retour à la feuille de séance de la Centrale (bouton « Feuille d'appel »). */
   retour?: () => void;
   /** Marqueur « fin de cours » de la classe (espace Présentation) ; renvoie le message à afficher. */
-  onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number }) => string;
+  onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number; t?: string }) => string;
   marked = false;
   board: number | null = null;
   /** Détour vers une ressource (renvoi cliqué) : où revenir dans la correction. */
   ret: { pageIndex: number; shown: number; view: { s: number; x: number; y: number }; focus: Rect | null } | null = null;
   /** Repère de fin de cours : point de la feuille où la classe s'est arrêtée (posé, ou repris du cours précédent). */
-  pin: { page: number; x: number; y: number; label: string } | null = null;
+  pin: { page: number; x: number; y: number; label: string; custom?: boolean } | null = null;
+  /** Repère en cours de déplacement (glisser l'épingle) ; sans mouvement, le clic ouvre l'édition. */
+  pinDrag: { dx: number; dy: number; x0: number; y0: number; moved: boolean } | null = null;
+  pinEd: HTMLDivElement | null = null;
   /** Vue cadrée sur le repère (reprise) : gardée quand la fenêtre change de taille (passage en plein écran). */
   pinFocus = false;
   pinG!: SVGGElement;
@@ -241,7 +244,8 @@ class Presenter {
     if (!this.onMark || this.board !== null) return;
     const r = this.ret;
     const pi = r ? r.pageIndex : this.pageIndex;
-    const pt = this.pin && this.pin.page === pi ? { x: Math.round(this.pin.x), y: Math.round(this.pin.y) } : undefined;
+    const p = this.pin && this.pin.page === pi ? this.pin : null;
+    const pt = p ? { x: Math.round(p.x), y: Math.round(p.y), ...(p.custom ? { t: p.label } : {}) } : undefined;
     const msg = r ? this.onMark(r.pageIndex, r.shown, countSteps(store.doc.pages[r.pageIndex]), pt)
       : this.onMark(this.pageIndex, this.shown, this.steps.length, pt);
     this.marked = true;
@@ -674,6 +678,14 @@ class Presenter {
       return;
     }
     if (e.button !== 0) return;
+    if (this.pinEd) this.closePinEditor(true);
+    if ((this.tool === "pointer" || this.tool === "pin") && (e.target as Element).closest?.(".pgrab") && this.pin) {
+      const [x, y] = this.toSheet(e);
+      this.svg.setPointerCapture(e.pointerId);
+      this.pinDrag = { dx: this.pin.x - x, dy: this.pin.y - y, x0: e.clientX, y0: e.clientY, moved: false };
+      this.svg.classList.add("pin-dragging");
+      return;
+    }
     if (this.tool === "pointer") {
       // glisser = rectangle de zoom ; clic = bloc sous le pointeur (ou retour à la feuille si déjà agrandi)
       const [x, y] = this.toSheet(e);
@@ -699,6 +711,18 @@ class Presenter {
   marquee: { x0: number; y0: number; x1: number; y1: number; el: SVGRectElement; target: Element } | null = null;
   erasing = false;
   onMove = (e: PointerEvent) => {
+    if (this.pinDrag && this.pin) {
+      const d = this.pinDrag;
+      if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 4) return;
+      d.moved = true;
+      const [x, y] = this.toSheet(e);
+      const page = this.page;
+      this.pin.x = page ? Math.min(Math.max(x + d.dx, 0), page.width) : x + d.dx;
+      this.pin.y = page ? Math.min(Math.max(y + d.dy, 0), page.height) : y + d.dy;
+      this.drawPin();
+      this.proj?.setInk(this.inkHtml());
+      return;
+    }
     if (this.pan) {
       cancelAnimationFrame(this.anim);
       this.view = { s: this.view.s, x: this.pan.vx + e.clientX - this.pan.x, y: this.pan.vy + e.clientY - this.pan.y };
@@ -738,6 +762,14 @@ class Presenter {
 
   onUp = () => {
     this.erasing = false;
+    if (this.pinDrag) {
+      const moved = this.pinDrag.moved;
+      this.pinDrag = null;
+      this.svg.classList.remove("pin-dragging");
+      if (moved) this.pinChanged("Repère déplacé.");
+      else this.openPinEditor();
+      return;
+    }
     if (this.pan) { this.pan = null; this.svg.classList.remove("panning"); return; }
     if (this.marquee) {
       const m = this.marquee;
@@ -811,10 +843,10 @@ class Presenter {
     // pointe de l'épingle sur le point ; ligne pointillée sur toute la largeur : « on s'est arrêtés à cette hauteur »
     const tx = p.x + r * 1.6 + tw > W ? p.x - r * 1.6 - tw : p.x + r * 1.6;
     this.pinG.innerHTML = `<line x1="0" x2="${W}" y1="${p.y}" y2="${p.y}" stroke="#f5a51e" stroke-width="${sw * 1.4}" stroke-dasharray="${r * 0.9} ${r * 0.6}" opacity=".9"/>
-      <path d="M${p.x} ${p.y} C${p.x - r * 0.5} ${p.y - r * 1.4} ${p.x - r * 1.25} ${p.y - r * 1.9} ${p.x - r * 1.25} ${p.y - r * 2.7} a${r * 1.25} ${r * 1.25} 0 1 1 ${r * 2.5} 0 C${p.x + r * 1.25} ${p.y - r * 1.9} ${p.x + r * 0.5} ${p.y - r * 1.4} ${p.x} ${p.y}z" fill="#f5a51e" stroke="#1b2230" stroke-width="${sw}"/>
+      <g class="pgrab"><path d="M${p.x} ${p.y} C${p.x - r * 0.5} ${p.y - r * 1.4} ${p.x - r * 1.25} ${p.y - r * 1.9} ${p.x - r * 1.25} ${p.y - r * 2.7} a${r * 1.25} ${r * 1.25} 0 1 1 ${r * 2.5} 0 C${p.x + r * 1.25} ${p.y - r * 1.9} ${p.x + r * 0.5} ${p.y - r * 1.4} ${p.x} ${p.y}z" fill="#f5a51e" stroke="#1b2230" stroke-width="${sw}"/>
       <circle cx="${p.x}" cy="${p.y - r * 2.7}" r="${r * 0.48}" fill="#1b2230"/>
       <rect x="${tx}" y="${p.y - r * 3.35}" width="${tw}" height="${r * 1.7}" rx="${r * 0.85}" fill="#1b2230" opacity=".92"/>
-      <text x="${tx + tw / 2}" y="${p.y - r * 2.2}" text-anchor="middle" style="font:700 ${fs}px system-ui,sans-serif;fill:#f5a51e">${esc(p.label)}</text>`;
+      <text x="${tx + tw / 2}" y="${p.y - r * 2.2}" text-anchor="middle" style="font:700 ${fs}px system-ui,sans-serif;fill:#f5a51e">${esc(p.label)}</text></g>`;
   }
 
   /** Outil Repère : poser l'épingle là où la classe s'arrête ; c'est aussi la fin de cours (🏁). */
@@ -828,6 +860,74 @@ class Presenter {
     this.setTool("pointer");
     if (this.onMark) this.markEnd();
     else this.hint("Repère posé. Pour qu'il soit gardé jusqu'au prochain cours, choisissez une classe dans l'espace Présentation.");
+  }
+
+  /** Après un déplacement ou une modification : projeté et, avec une classe, enregistré comme fin de cours. */
+  pinChanged(msg: string) {
+    this.drawPin();
+    this.proj?.setInk(this.inkHtml());
+    if (this.onMark) this.markEnd();
+    else this.hint(msg);
+  }
+
+  /** Clic sur le repère posé : modifier son texte, le supprimer (le glisser le déplace). */
+  openPinEditor() {
+    const p = this.pin;
+    if (!p) return;
+    this.closePinEditor(false);
+    const r = this.svg.getBoundingClientRect();
+    const sx = r.left + this.view.x + p.x * this.view.s, sy = r.top + this.view.y + p.y * this.view.s;
+    const ed = document.createElement("div");
+    ed.className = "pin-ed";
+    ed.innerHTML = `<label>Texte du repère<input type="text" maxlength="80"></label>
+      <div><button data-e="ok" class="ok">OK</button><button data-e="del" title="Retirer le repère de la feuille">🗑 Supprimer</button><button data-e="x">Annuler</button></div>
+      <small>Glissez l'épingle pour la déplacer.</small>`;
+    this.root.appendChild(ed);
+    const inp = ed.querySelector("input")!;
+    inp.value = p.label;
+    // sous l'épingle, sans sortir de l'écran
+    const w = ed.offsetWidth, h = ed.offsetHeight;
+    ed.style.left = `${Math.min(Math.max(sx - w / 2, 8), innerWidth - w - 8)}px`;
+    ed.style.top = `${sy + 12 + h > innerHeight - 8 ? Math.max(sy - h - 60, 8) : sy + 12}px`;
+    ed.addEventListener("pointerdown", (e) => e.stopPropagation());
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); this.closePinEditor(true); }
+      else if (e.key === "Escape") { e.preventDefault(); this.closePinEditor(false); }
+    });
+    ed.querySelectorAll<HTMLButtonElement>("[data-e]").forEach((b) => (b.onclick = (e) => {
+      e.stopPropagation();
+      const a = b.dataset.e;
+      if (a === "ok") this.closePinEditor(true);
+      else if (a === "x") this.closePinEditor(false);
+      else this.removePin();
+    }));
+    this.pinEd = ed;
+    inp.focus();
+    inp.select();
+  }
+
+  /** Ferme l'édition ; `apply` : garde le texte saisi (vide : texte d'origine). */
+  closePinEditor(apply: boolean) {
+    const ed = this.pinEd;
+    if (!ed) return;
+    this.pinEd = null;
+    const v = ed.querySelector("input")!.value.trim();
+    ed.remove();
+    if (!apply || !this.pin || v === this.pin.label) return;
+    if (v) { this.pin.label = v; this.pin.custom = true; }
+    else {
+      const d = new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+      this.pin.label = `Arrêt du ${d}${this.label ? ` · ${this.label}` : ""}`;
+      this.pin.custom = false;
+    }
+    this.pinChanged("Texte du repère modifié.");
+  }
+
+  removePin() {
+    if (this.pinEd) { this.pinEd.remove(); this.pinEd = null; }
+    this.pin = null;
+    this.pinFocus = false;
+    this.pinChanged("Repère supprimé.");
   }
 
   /** Reprise : pleine largeur, le repère au tiers de la hauteur de l'écran. */
@@ -920,6 +1020,7 @@ class Presenter {
 
   onKey = (e: KeyboardEvent) => {
     if (!current) return;
+    if (this.pinEd?.contains(e.target as Node)) return; // saisie du texte du repère
     e.stopPropagation();
     if (e.key === " ") {
       e.preventDefault();
@@ -1082,9 +1183,9 @@ export interface PresentOptions {
   label?: string;   // classe, affichée dans la barre
   onProgress?: (pageIndex: number, shown: number, total: number) => void;
   onClose?: () => void;
-  onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number }) => string;
+  onMark?: (pageIndex: number, shown: number, total: number, pt?: { x: number; y: number; t?: string }) => string;
   /** Repère du cours précédent, affiché (et cadré) à la reprise. */
-  pin?: { page: number; x: number; y: number; label: string };
+  pin?: { page: number; x: number; y: number; label: string; custom?: boolean };
   dual?: boolean;   // double vue : ouvrir aussi la fenêtre de projection
   /** FicheStudio ouvert depuis la Centrale : bouton « Feuille d'appel » (retour à la feuille de séance). */
   retour?: () => void;

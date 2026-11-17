@@ -225,6 +225,15 @@ body.resizing { cursor: col-resize; user-select: none; }
 #present svg[data-tool="eraser"] { cursor: cell; }
 #present svg[data-tool="pin"] { cursor: copy; }
 #present .pin { pointer-events: none; }
+#present svg[data-tool="pointer"] .pgrab, #present svg[data-tool="pin"] .pgrab { pointer-events: auto; cursor: grab; }
+#present svg.pin-dragging, #present svg.pin-dragging .pgrab { cursor: grabbing; }
+#present .pin-ed { position: absolute; z-index: 8; background: #1b2230; border: 1px solid #f5a51e; border-radius: 10px; padding: 10px 12px; box-shadow: 0 8px 30px rgba(0,0,0,.5); font-size: 13px; display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
+#present .pin-ed label { display: flex; flex-direction: column; gap: 4px; color: #f5a51e; font-weight: 600; }
+#present .pin-ed input { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid #3a4456; background: #0f1319; color: #fff; }
+#present .pin-ed div { display: flex; gap: 6px; }
+#present .pin-ed button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid #3a4456; background: #262e3d; color: #fff; cursor: pointer; }
+#present .pin-ed button.ok { background: #f5a51e; border-color: #f5a51e; color: #1b2230; font-weight: 700; }
+#present .pin-ed small { color: #9aa4b5; }
 #present .sheet { filter: drop-shadow(0 6px 24px rgba(0,0,0,.5)); }
 #present .reflink { fill: rgba(79,140,255,.13); stroke: rgba(79,140,255,.85); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: pointer; }
 #present .reflink:hover { fill: rgba(79,140,255,.3); }

@@ -78,14 +78,27 @@ async function lireJson(r: Response) {
 export async function listerDocuments(): Promise<CentraleDocument[]> {
   return (await lireJson(await fetch(`${centraleApi}?documents`, { cache: "no-store", credentials: "same-origin" }))).documents;
 }
+/** Documents ouverts depuis la Centrale ou déjà enregistrés dessus depuis ce navigateur : « Enregistrer » les
+ *  remplace sans demander (un autre document du même nom, lui, demande confirmation). */
+const K_CONNUS = "fichestudio.surCentrale";
+function connus(): string[] { try { return JSON.parse(localStorage.getItem(K_CONNUS) ?? "[]"); } catch { return []; } }
+export const estConnuSurCentrale = (nom: string) => connus().includes(nom);
+export function marquerSurCentrale(nom: string) {
+  const l = connus().filter((x) => x !== nom);
+  l.push(nom);
+  try { localStorage.setItem(K_CONNUS, JSON.stringify(l.slice(-200))); } catch { /* stockage indisponible */ }
+}
+
 /** Le document, sous forme de fichier .fstudio (à passer à l'ouverture habituelle). */
 export async function chargerDocument(nom: string): Promise<File> {
   const r = await fetch(urlDoc(nom), { cache: "no-store", credentials: "same-origin" });
   if (!r.ok) await lireJson(r);
+  marquerSurCentrale(nom);
   return new File([await r.blob()], `${nom}.fstudio`, { type: "application/json" });
 }
 export async function enregistrerDocument(nom: string, json: string): Promise<void> {
   await lireJson(await fetch(urlDoc(nom), { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: json }));
+  marquerSurCentrale(nom);
 }
 export async function retirerDocument(nom: string): Promise<void> {
   await lireJson(await fetch(urlDoc(nom, "&supprimer"), { method: "POST", credentials: "same-origin" }));

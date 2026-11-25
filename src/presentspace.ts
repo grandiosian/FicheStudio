@@ -6,7 +6,7 @@ import { countSteps, startPresentation, pinDefaultLabel, type PresPin } from "./
 import { docBrowser } from "./docbrowser";
 import { DEFAULT_LEVEL_COLORS } from "./model";
 import { centraleApi, centraleAdmin, toutEnvoyer, chargerCentrale, envoyerAvancement, etatEnvoi, suivreEnvoi, type CentraleCours,
-  listerDocuments, chargerDocument, enregistrerDocument, retirerDocument, nomDocumentCentrale } from "./centrale";
+  listerDocuments, chargerDocument, enregistrerDocument, retirerDocument, nomDocumentCentrale, estConnuSurCentrale } from "./centrale";
 import { assetBytes } from "./assets";
 
 /** sub : groupe (demi-classe) d'une classe de la Centrale ; etab : établissement (Centrale). */
@@ -412,32 +412,43 @@ function centraleDocs(onOpen: (f: File) => Promise<void>) {
 
 /** Range le document ouvert sur la Centrale, images liées intégrées (le document ouvert n'est pas modifié). */
 async function saveToCentrale(redraw: () => void) {
-  const doc = store.doc;
-  const nom = nomDocumentCentrale(doc.name);
   const btn = document.querySelector<HTMLButtonElement>('[data-k="csave"]');
   const label = btn?.querySelector("span")?.textContent ?? btn?.textContent ?? "";
   try {
-    const existants = await listerDocuments();
-    if (existants.some((d) => d.nom === nom) && !confirm(`« ${nom} » est déjà sur la Centrale. Le remplacer par la version ouverte ?`)) return;
-    if (btn) { btn.disabled = true; const sp = btn.querySelector("span"); if (sp) sp.textContent = "Envoi…"; else btn.textContent = "☁ Envoi…"; }
-    const copie = JSON.parse(JSON.stringify(doc)) as typeof doc;
-    const manquantes: string[] = [];
-    for (const [key, a] of Object.entries(copie.assets)) {
-      if (a.data) continue;
-      try {
-        const b = await assetBytes(doc, key);
-        const data = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(new Blob([b.data], { type: b.mime || a.mime })); });
-        copie.assets[key] = { mime: b.mime || a.mime, name: a.name, data, w: a.w, h: a.h };
-      } catch { manquantes.push(a.name); }
-    }
-    // l'avancement des classes est repéré par le nom du document : il doit rester le même
-    copie.name = doc.name;
-    await enregistrerDocument(nom, JSON.stringify(copie));
-    alert(`« ${nom} » est enregistré sur la Centrale.${manquantes.length ? `\n\nImages liées introuvables, non intégrées : ${manquantes.join(", ")}` : ""}`);
+    const r = await enregistrerSurCentrale(() => { if (btn) { btn.disabled = true; const sp = btn.querySelector("span"); if (sp) sp.textContent = "Envoi…"; else btn.textContent = "☁ Envoi…"; } });
+    if (!r) return;
+    alert(`« ${r.nom} » est enregistré sur la Centrale.${r.manquantes.length ? `\n\nImages liées introuvables, non intégrées : ${r.manquantes.join(", ")}` : ""}`);
   } catch (e) {
     alert(`Enregistrement sur la Centrale impossible : ${(e as Error).message}`);
   } finally {
     if (btn) { btn.disabled = false; const sp = btn.querySelector("span"); if (sp) sp.textContent = label; else btn.textContent = label; }
     redraw();
   }
+}
+
+/** Enregistre le document ouvert sur la Centrale, images liées intégrées (le document ouvert n'est pas modifié).
+ *  Remplace sans demander un document venu de la Centrale ; sinon, demande avant d'écraser un homonyme.
+ *  Renvoie null si l'enseignant a renoncé ; lève une erreur si l'envoi échoue. */
+export async function enregistrerSurCentrale(debut?: () => void): Promise<{ nom: string; manquantes: string[] } | null> {
+  const doc = store.doc;
+  const nom = nomDocumentCentrale(doc.name);
+  if (!estConnuSurCentrale(nom)) {
+    const existants = await listerDocuments();
+    if (existants.some((d) => d.nom === nom) && !confirm(`« ${nom} » est déjà sur la Centrale. Le remplacer par la version ouverte ?`)) return null;
+  }
+  debut?.();
+  const copie = JSON.parse(JSON.stringify(doc)) as typeof doc;
+  const manquantes: string[] = [];
+  for (const [key, a] of Object.entries(copie.assets)) {
+    if (a.data) continue;
+    try {
+      const b = await assetBytes(doc, key);
+      const data = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(r.result as string); r.readAsDataURL(new Blob([b.data], { type: b.mime || a.mime })); });
+      copie.assets[key] = { mime: b.mime || a.mime, name: a.name, data, w: a.w, h: a.h };
+    } catch { manquantes.push(a.name); }
+  }
+  // l'avancement des classes est repéré par le nom du document : il doit rester le même
+  copie.name = doc.name;
+  await enregistrerDocument(nom, JSON.stringify(copie));
+  return { nom, manquantes };
 }

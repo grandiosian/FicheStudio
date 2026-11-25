@@ -4,7 +4,7 @@ import { enterIsolation, exitIsolation, isIsolated } from "./canvas";
 import { initCanvas, setTool, zoomBy, zoomToFit, zoomToWidth, view, cancelInteraction, deleteActiveAnchor, insertImageNode, isTyping, finishPen } from "./canvas";
 import { loadCharteInit, prefsDialog } from "./prefs";
 import { hasCharteMasters, updateCharteMasters } from "./charte";
-import { openPresentSpace, initPresentSpace, demandeCentrale } from "./presentspace";
+import { openPresentSpace, initPresentSpace, demandeCentrale, enregistrerSurCentrale } from "./presentspace";
 import { docBrowser } from "./docbrowser";
 import { centraleApi, chargerDocument, nomDocumentCentrale } from "./centrale";
 import { reimportAffinity } from "./reimport";
@@ -238,7 +238,8 @@ const previewVars = () => (store.previewRow !== null ? store.doc.data.rows[store
 const ACTIONS: Record<string, () => void | Promise<void>> = {
   new: () => { closeTextEditor(); store.openTab(newDoc()); },
   open: async () => { const f = await pickFile(".fstudio,.af,.afdesign,.afpub,.afphoto,.json,.fiche"); if (f) await openFile(f); },
-  save: () => { saveNative(store.doc); store.markSaved(); },
+  save: () => save(),
+  exportfile: () => { saveNative(store.doc); if (!centraleApi) store.markSaved(); },
   pdf: () => pdfDialog(),
   pdfseries: () => pdfDialog(true),
   print: () => printPdf(store.doc, [previewVars()]),
@@ -312,7 +313,7 @@ const tabIcon = (d: { pages: { kind?: string }[] }) => {
 };
 function closeTabAsk(i: number) {
   const name = (i === store.activeTab ? store.doc : store.tabs[i]?.doc)?.name ?? "";
-  if (store.isDirty(i) && !confirm(`Fermer « ${name} » ? Les modifications non enregistrées (fichier .fstudio) seront perdues.`)) return;
+  if (store.isDirty(i) && !confirm(`Fermer « ${name} » ? Les modifications non enregistrées (${centraleApi ? "sur la Centrale" : "fichier .fstudio"}) seront perdues.`)) return;
   store.closeTab(i);
 }
 
@@ -371,7 +372,40 @@ function tabList(anchor: HTMLElement) {
   };
 }
 
+/** Enregistrer : sur la Centrale quand FicheStudio y est servi, sinon fichier .fstudio téléchargé. */
+let saving = false;
+async function save() {
+  if (!centraleApi) { saveNative(store.doc); store.markSaved(); return; }
+  if (saving) return;
+  saving = true;
+  try {
+    const r = await enregistrerSurCentrale(() => status("☁ Enregistrement sur la Centrale…"));
+    if (!r) { status("Enregistrement annulé."); return; }
+    store.markSaved();
+    const h = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    status(`✓ « ${r.nom} » enregistré sur la Centrale à ${h}.${r.manquantes.length ? ` Images liées introuvables, non intégrées : ${r.manquantes.join(", ")}` : ""}`, r.manquantes.length > 0);
+  } catch (e) {
+    status(`Enregistrement sur la Centrale impossible : ${(e as Error).message}`, true, { label: "Réessayer", run: () => void save() });
+  } finally { saving = false; }
+}
+
+/** Sur la Centrale : « Enregistrer » range le document sur la Centrale ; le fichier .fstudio devient « Exporter ». */
+function libellesCentrale() {
+  if (!centraleApi) return;
+  const menu = document.querySelector<HTMLElement>('.menu [data-act="save"], details [data-act="save"]');
+  if (menu) {
+    menu.innerHTML = `Enregistrer <kbd>⌘S</kbd><small>sur la Centrale, pour l'ouvrir depuis tout poste</small>`;
+    const ex = document.createElement("button");
+    ex.dataset.act = "exportfile";
+    ex.innerHTML = `Exporter .fstudio<small>copie du document à télécharger</small>`;
+    menu.after(ex);
+  }
+  const side = document.querySelector<HTMLElement>('#export [data-act="save"]');
+  if (side) side.title = "Enregistrer sur la Centrale (⌘S)";
+}
+
 function buildTopbar() {
+  libellesCentrale();
   document.querySelectorAll<HTMLElement>("[data-act]").forEach((b) => {
     b.onclick = () => { b.closest("details")?.removeAttribute("open"); ACTIONS[b.dataset.act!]?.(); };
   });
@@ -448,7 +482,7 @@ function onKey(e: KeyboardEvent) {
   const k = e.key.toLowerCase();
   if (mod && k === "z") { e.preventDefault(); e.shiftKey ? store.redo() : store.undo(); return; }
   if (mod && k === "y") { e.preventDefault(); store.redo(); return; }
-  if (mod && k === "s") { e.preventDefault(); saveNative(store.doc); store.markSaved(); return; }
+  if (mod && k === "s") { e.preventDefault(); void save(); return; }
   if (mod && k === "o") { e.preventDefault(); ACTIONS.open(); return; }
   if (mod && k === "p") { e.preventDefault(); ACTIONS.pdf(); return; }
   if (mod && k === "d") { e.preventDefault(); duplicate(); return; }

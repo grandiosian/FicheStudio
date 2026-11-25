@@ -646,6 +646,19 @@ async function ouvrirDepuisLien() {
     setTimeout(() => document.querySelector<HTMLElement>('[data-cmd="templates"]')?.click(), 50);
     return;
   }
+  // « Modifier la fiche » (page Ateliers de la Centrale) : #ouvrir=<document de la Centrale>, dans l'éditeur
+  if (centraleApi && /^#ouvrir=/.test(location.hash)) {
+    const nom = new URLSearchParams(location.hash.slice(1)).get("ouvrir") ?? "";
+    history.replaceState(null, "", location.pathname + location.search);
+    if (isPresenting()) stopPresentation();
+    closeTextEditor();
+    store.editingMaster = null;
+    const ouvert = store.tabs.findIndex((t, i) => nomDocumentCentrale((i === store.activeTab ? store.doc : t.doc).name) === nom);
+    if (ouvert >= 0) { store.switchTab(ouvert); status(`« ${nom} » était déjà ouvert : version de cet onglet (⌘S pour l'enregistrer sur la Centrale).`); return; }
+    try { await openFile(await chargerDocument(nom)); status(`« ${nom} » ouvert depuis la Centrale. ⌘S pour y enregistrer vos modifications.`); }
+    catch (e) { status(`Document « ${nom} » : ${(e as Error).message}`, true); }
+    return;
+  }
   if (!centraleApi || !/^#(presenter|classe)=/.test(location.hash)) return;
   const q = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, "", location.pathname + location.search);   // un rechargement ne rouvre pas

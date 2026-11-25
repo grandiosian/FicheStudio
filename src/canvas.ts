@@ -321,7 +321,7 @@ function pickable(target: EventTarget | null): string | null {
 type Drag =
   | { kind: "pan"; sx: number; sy: number; vx: number; vy: number }
   | { kind: "move"; start: Vec; box: Box; moved: boolean; delta: Vec; others: Box[] }
-  | { kind: "scale"; start: Vec; box: Box; handle: string; M: Mat }
+  | { kind: "scale"; start: Vec; box: Box; handle: string; M: Mat; texts: Map<string, TextOrig> }
   | { kind: "rotate"; start: Vec; center: Vec; M: Mat }
   | { kind: "marquee"; start: Vec; cur: Vec; add: boolean }
   | { kind: "create"; tool: string; start: Vec; cur: Vec }
@@ -366,7 +366,12 @@ function onDown(e: PointerEvent) {
     const box = selectionBox();
     if (!box) return;
     if (handle === "rot") drag = { kind: "rotate", start: p, center: { x: box.x + box.w / 2, y: box.y + box.h / 2 }, M: [1, 0, 0, 1, 0, 0] };
-    else drag = { kind: "scale", start: p, box, handle, M: [1, 0, 0, 1, 0, 0] };
+    else {
+      // textes à cadre : redimensionnés en direct (le texte se réagence au lieu d'être étiré)
+      const texts = new Map<string, TextOrig>();
+      for (const n of store.selected()) if (n.type === "text" && n.frame && !n.locked) texts.set(n.id, { frame: { ...n.frame }, transform: [...n.transform] as Mat });
+      drag = { kind: "scale", start: p, box, handle, M: [1, 0, 0, 1, 0, 0], texts };
+    }
     return;
   }
   if (tool === "pen") { penDown(p, e); return; }
@@ -416,7 +421,8 @@ function onMove(e: PointerEvent) {
       let sy = handle.includes("n") || handle.includes("s") ? (q.y - ay) / ((handle.includes("n") ? box.y : box.y + box.h) - ay) : 1;
       if (e.shiftKey && handle.length === 2) { const s = Math.max(Math.abs(sx), Math.abs(sy)); sx = Math.sign(sx || 1) * s; sy = Math.sign(sy || 1) * s; }
       drag.M = scaleAt(sx || 1e-3, sy || 1e-3, { x: ax, y: ay });
-      previewTransform(drag.M);
+      if (drag.texts.size) liveTextScale(drag.M, drag.texts);
+      previewTransform(drag.M, drag.texts);
       return;
     }
     case "rotate": {
@@ -492,7 +498,7 @@ function onUp(e: PointerEvent) {
       if (d.moved) commitTransform(translate(d.delta.x, d.delta.y), false);
       else drawOverlay();
       break;
-    case "scale": commitTransform(d.M, true); break;
+    case "scale": restoreTexts(d.texts); commitTransform(d.M, true); break;
     case "rotate": commitTransform(d.M, false); break;
     case "marquee": {
       const r = boxOfPoints([d.start, d.cur]);
@@ -548,9 +554,10 @@ export function setTool(t: typeof store.tool) {
  *  est déjà déplacé, le remesurer puis appliquer M une seconde fois décalait les poignées (×2). */
 let previewBase: Map<string, Box> | null = null;
 
-function previewTransform(M: Mat) {
+function previewTransform(M: Mat, skip?: Map<string, unknown>) {
   previewBase ??= selectionBoxes();
   for (const id of store.selection) {
+    if (skip?.has(id)) continue;
     const el = content.querySelector(`[data-id="${id}"]`);
     const f = store.find(id);
     if (!el || !f) continue;
@@ -559,6 +566,33 @@ function previewTransform(M: Mat) {
     el.setAttribute("transform", `matrix(${local.map(fmt).join(" ")})`);
   }
   drawOverlay(M);
+}
+
+/** Cadre et position d'un texte au début de l'étirement. */
+interface TextOrig { frame: { x: number; y: number; w: number; h: number }; transform: Mat }
+
+function restoreTexts(texts: Map<string, TextOrig>) {
+  for (const [id, o] of texts) {
+    const n = store.find(id)?.node;
+    if (n?.type === "text" && n.frame) { Object.assign(n.frame, o.frame); n.transform = [...o.transform] as Mat; }
+  }
+}
+
+/** Étirement d'un texte à cadre : le cadre suit la poignée et le texte se réagence à chaque image. */
+let textFrame = 0;
+function liveTextScale(M: Mat, texts: Map<string, TextOrig>) {
+  cancelAnimationFrame(textFrame);
+  textFrame = requestAnimationFrame(() => {
+    if (drag?.kind !== "scale") return;
+    restoreTexts(texts);
+    for (const id of texts.keys()) {
+      const n = store.find(id)?.node;
+      if (n) transformNode(n, M, store.parentCumulative(id), true);
+    }
+    render();
+    previewTransform(M, texts); // le rendu a remis les autres éléments en place
+    restoreTexts(texts);        // le modèle ne change qu'au relâcher (une seule annulation)
+  });
 }
 
 function commitTransform(M: Mat, bake: boolean) {

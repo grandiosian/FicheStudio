@@ -284,6 +284,102 @@ const ICON: Record<string, string> = { group: "▣", shape: "◆", path: "✎", 
 const STEP_ICON = `<span class="step-ic" title="Étape de correction">⏵</span>`;
 const expanded = new Set<string>(); // replié par défaut : un document importé compte des milliers d'objets
 
+/** Calque ou élément saisi dans l'arborescence (glisser-déposer). */
+let treeDrag: { ids: string[]; layer: boolean } | null = null;
+type DropZone = "before" | "after" | "in";
+const clearDropMarks = (el: HTMLElement) => el.querySelectorAll(".drop-before, .drop-after, .drop-in").forEach((x) => x.classList.remove("drop-before", "drop-after", "drop-in"));
+const contains = (n: SceneNode, id: string) => { let hit = false; walk([n], (x) => { if (x.id === id) hit = true; }); return hit; };
+
+/** Où déposer sur cette ligne : au-dessus, en dessous, ou dedans (calque, groupe) ; null si impossible. */
+function dropZone(li: HTMLElement, targetId: string, targetIsLayer: boolean, y: number): DropZone | null {
+  const d = treeDrag;
+  if (!d || d.ids.includes(targetId)) return null;
+  const r = li.getBoundingClientRect(), t = (y - r.top) / r.height;
+  if (d.layer) return targetIsLayer ? (t < 0.5 ? "before" : "after") : null; // un calque ne va qu'entre calques
+  if (targetIsLayer) return "in";                                          // un élément déposé sur un calque y entre (au premier plan)
+  const target = store.find(targetId);
+  if (!target) return null;
+  // pas de groupe déposé dans lui-même ou dans l'un de ses enfants
+  for (const id of d.ids) { const n = store.find(id)?.node; if (n && contains(n, targetId)) return null; }
+  if (target.parent.mask === target.node) return null;
+  if (target.node.type === "group") return t < 0.25 ? "before" : t > 0.75 ? "after" : "in";
+  return t < 0.5 ? "before" : "after";
+}
+
+/** Déplace les éléments (ou le calque) saisis ; la liste est à l'envers de la pile : « au-dessus » = devant. */
+function dropInTree(d: { ids: string[]; layer: boolean }, targetId: string, targetIsLayer: boolean, zone: DropZone) {
+  if (d.layer) {
+    store.commit(() => {
+      const ls = store.page.layers;
+      const moving = ls.find((l) => l.id === d.ids[0]);
+      const target = ls.find((l) => l.id === targetId);
+      if (!moving || !target) return;
+      ls.splice(ls.indexOf(moving), 1);
+      ls.splice(ls.indexOf(target) + (zone === "before" ? 1 : 0), 0, moving);
+      store.activeLayer = moving.id;
+    });
+    return;
+  }
+  // éléments dans l'ordre de la pile (du fond vers le devant), sans les masques
+  const found = d.ids.map((id) => store.find(id)).filter((f): f is NonNullable<typeof f> => !!f && f.parent.mask !== f.node);
+  if (!found.length) return;
+  const targetLayer = targetIsLayer ? store.page.layers.find((l) => l.id === targetId) : null;
+  const target = targetLayer ? null : store.find(targetId);
+  const parent: GroupNode | undefined = targetLayer ?? (zone === "in" ? target?.node as GroupNode : target?.parent);
+  if (!parent || parent.type !== "group") return;
+  // repère du nouveau parent : l'élément garde sa place sur la feuille
+  const B = store.cumulative(parent);
+  const moves = found.map((f) => ({ node: f.node, A: store.parentCumulative(f.node.id), z: zIndexOf(f.node.id) })).sort((a, b) => a.z - b.z);
+  store.commit(() => {
+    for (const m of moves) {
+      const f = store.find(m.node.id)!;
+      f.parent.children.splice(f.parent.children.indexOf(m.node), 1);
+      m.node.transform = mul(inv(B), mul(m.A, m.node.transform));
+    }
+    const kids = parent.children;
+    const at = zone === "in" ? kids.length : kids.indexOf(target!.node) + (zone === "before" ? 1 : 0);
+    kids.splice(at, 0, ...moves.map((m) => m.node));
+    store.selection = moves.map((m) => m.node.id);
+    const layer = store.page.layers.find((l) => contains(l, moves[0].node.id));
+    if (layer) store.activeLayer = layer.id;
+  });
+}
+
+/** Rang dans la pile de la feuille (pour garder l'ordre de plusieurs éléments déplacés ensemble). */
+function zIndexOf(id: string): number {
+  let i = 0, at = -1;
+  walk(store.page.layers, (n) => { if (n.id === id) at = i; i++; });
+  return at;
+}
+
+/** Renommer sur place (double-clic sur le nom) : Entrée valide, Échap annule. */
+function renameInline(li: HTMLElement, node: SceneNode) {
+  const nm = li.querySelector<HTMLElement>(".nm");
+  if (!nm || li.querySelector("input.rename")) return;
+  const inp = document.createElement("input");
+  inp.className = "rename";
+  inp.value = node.name ?? "";
+  nm.replaceWith(inp);
+  li.draggable = false;
+  inp.focus();
+  inp.select();
+  let done = false;
+  const finish = (ok: boolean) => {
+    if (done) return;
+    done = true;
+    const name = inp.value.trim();
+    if (ok && name && name !== node.name) store.commit(() => { node.name = name; });
+    else refreshLayers();
+  };
+  inp.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  };
+  inp.onblur = () => finish(true);
+  for (const t of ["click", "dblclick", "mousedown"] as const) inp.addEventListener(t, (e) => e.stopPropagation());
+}
+
 function refreshLayers() {
   const el = $("#layers");
   for (const id of store.selection) {
@@ -369,10 +465,37 @@ function refreshLayers() {
     li.ondblclick = (e) => {
       const node = isLayer ? store.page.layers.find((l) => l.id === id)! : store.find(id)?.node;
       if (!node) return;
-      // double-clic : cadrer l'élément ; ⌥ double-clic : renommer
-      if (!e.altKey) { frameNode(id); return; }
-      const name = prompt("Nom", node.name);
-      if (name !== null) store.commit(() => { node.name = name; });
+      // double-clic sur le nom (ou ⌥ double-clic) : renommer sur place ; ailleurs sur la ligne : cadrer l'élément
+      if (e.altKey || (e.target as HTMLElement).closest(".nm")) { renameInline(li, node); return; }
+      frameNode(id);
+    };
+    // glisser-déposer : changer l'ordre des calques, ranger un élément dans un autre calque ou groupe
+    li.draggable = true;
+    li.ondragstart = (e) => {
+      if ((e.target as HTMLElement).closest("input")) { e.preventDefault(); return; }
+      const ids = isLayer ? [id] : store.selection.includes(id) ? store.selection.filter((x) => !store.page.layers.some((l) => l.id === x)) : [id];
+      treeDrag = { ids, layer: isLayer };
+      e.dataTransfer!.effectAllowed = "move";
+      e.dataTransfer!.setData("text/plain", ids.join(","));
+      li.classList.add("dragging");
+    };
+    li.ondragend = () => { treeDrag = null; li.classList.remove("dragging"); clearDropMarks(el); };
+    li.ondragover = (e) => {
+      const zone = treeDrag && dropZone(li, id, isLayer, e.clientY);
+      if (!zone) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "move";
+      clearDropMarks(el);
+      li.classList.add(`drop-${zone}`);
+    };
+    li.ondragleave = (e) => { if (!li.contains(e.relatedTarget as Node)) li.classList.remove("drop-before", "drop-after", "drop-in"); };
+    li.ondrop = (e) => {
+      e.preventDefault();
+      const zone = treeDrag && dropZone(li, id, isLayer, e.clientY);
+      const d = treeDrag;
+      treeDrag = null;
+      clearDropMarks(el);
+      if (zone && d) dropInTree(d, id, isLayer, zone);
     };
   });
   const L = () => store.page.layers.findIndex((l) => l.id === store.layer().id);

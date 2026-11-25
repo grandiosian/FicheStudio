@@ -5,7 +5,7 @@ import { Projector } from "./projector";
 import { fitText, stepsHtml } from "./textfs";
 import { store } from "./store";
 import { renderPage } from "./render";
-import type { GroupNode, Page, SceneNode } from "./model";
+import { findNode, walk, type GroupNode, type Page, type SceneNode } from "./model";
 import { findRefs, resourceIndex, type RefTarget } from "./reflinks";
 
 type Tool = "pointer" | "hand" | "pen" | "marker" | "arrow" | "eraser" | "pin";
@@ -25,6 +25,12 @@ const WIDTHS = [3, 6, 12]; // px à l'écran
 const ink = new Map<string, Stroke[]>();      // annotations par feuille (clé : id de page ou tableau)
 const boards: BoardBg[] = [];
 
+/** Le nœud contient-il du texte visible (non vide) ? */
+const hasText = (node: SceneNode | undefined) => {
+  let ok = false;
+  if (node) walk([node], (n) => { if (!ok && n.type === "text" && n.visible !== false && n.paragraphs.some((p) => p.runs.some((r) => r.text.trim()))) ok = true; });
+  return ok;
+};
 const isCorrection = (n: SceneNode) => n.type === "group" && /(_|\s|^)corr(ig[ée])?(_|\s|$)/i.test(n.name);
 
 /** Format du rectangle de zoom : celui de l'écran, un format de vidéoprojecteur, ou libre. */
@@ -61,7 +67,9 @@ class Presenter {
   /** Feuilles à présenter, dans l'ordre (toutes par défaut). */
   order: number[] = store.doc.pages.map((_, i) => i);
   /** Corrigé en plein écran : texte de l'étape révélée (« step ») ou de tout le corrigé (« all »). */
-  textMode: "" | "step" | "all" = "";
+  textMode: "" | "step" | "all" | "one" = "";
+  /** Texte de corrigé cliqué sur la feuille (mode « one ») : où il a été ouvert. */
+  textOne: { id: string; pageIndex: number; shown: number } | null = null;
   textEl: HTMLDivElement | null = null;
   /** Double vue : fenêtre de projection pilotée depuis cette vue professeur. */
   proj: Projector | null = null;
@@ -246,13 +254,23 @@ class Presenter {
   openText(mode: "step" | "all") {
     if (this.board !== null) return;
     this.textMode = mode;
+    this.textOne = null;
     if (mode === "all" && this.shown < this.steps.length) { this.shown = this.steps.length; this.applySteps(); }
     else if (mode === "step" && this.shown === 0 && this.steps.length) { this.shown = 1; this.applySteps(); }
     this.renderText();
     this.renderBar();
   }
+  /** Un texte de corrigé cliqué sur la feuille, seul, remis en page sur tout l'écran. */
+  openOne(id: string) {
+    if (this.board !== null) return;
+    this.textMode = "one";
+    this.textOne = { id, pageIndex: this.pageIndex, shown: this.shown };
+    this.renderText();
+    this.renderBar();
+  }
   closeText() {
     this.textMode = "";
+    this.textOne = null;
     this.textEl?.remove();
     this.textEl = null;
     this.proj?.setText(null);
@@ -260,10 +278,16 @@ class Presenter {
   }
   renderText() {
     if (!this.textMode) return;
+    // on avance (ou change de feuille) depuis un texte cliqué : on suit la correction étape par étape
+    const one = this.textOne;
+    if (this.textMode === "one" && (!one || one.pageIndex !== this.pageIndex || one.shown !== this.shown)) { this.textMode = "step"; this.textOne = null; }
+    if (this.textMode === "one" && one) return this.renderTextHtml(stepsHtml([one.id], this.pageIndex), `Correction · ${this.page?.name ?? ""}`);
     const ids = this.textMode === "all" ? this.steps.slice(0, this.shown) : this.steps.slice(Math.max(0, this.shown - 1), this.shown);
     const html = stepsHtml(ids, this.pageIndex);
     const label = this.textMode === "all" ? `Tout le corrigé · ${this.page?.name ?? ""}` : this.steps.length ? `Étape ${this.shown} / ${this.steps.length} · ${this.page?.name ?? ""}` : this.page?.name ?? "";
-    const body = html || `<div class="tf-empty">${this.steps.length ? "Pas de texte dans cette étape" : "Pas de correction sur cette feuille"}</div>`;
+    this.renderTextHtml(html || `<div class="tf-empty">${this.steps.length ? "Pas de texte dans cette étape" : "Pas de correction sur cette feuille"}</div>`, label);
+  }
+  renderTextHtml(body: string, label: string) {
     if (!this.textEl) {
       this.textEl = document.createElement("div");
       this.textEl.className = "textfs";
@@ -273,7 +297,8 @@ class Presenter {
         <button data-tf="step" class="${this.textMode === "step" ? "on" : ""}" title="Une étape à la fois (T)">Étape</button>
         <button data-tf="all" class="${this.textMode === "all" ? "on" : ""}" title="Tout le corrigé de la feuille">Tout le corrigé</button>
         <button data-tf="close" title="Revenir à la feuille (Échap ou T)">✕</button></div>
-      <div class="tf-box"><div class="tf-content">${body}</div></div>`;
+      <div class="tf-box" title="Cliquer pour revenir à la feuille"><div class="tf-content">${body}</div></div>`;
+    this.textEl.querySelector<HTMLElement>(".tf-box")!.onclick = () => this.closeText();
     this.textEl.querySelectorAll<HTMLElement>("[data-tf]").forEach((b) => (b.onclick = (e) => {
       e.stopPropagation();
       const k = b.dataset.tf!;
@@ -783,6 +808,8 @@ class Presenter {
       if (w * this.view.s > 12 && h * this.view.s > 12) { this.zoomTo({ x: Math.min(m.x0, m.x1), y: Math.min(m.y0, m.y1), w, h }, 0); return; }
       const link = (m.target as Element).closest?.<SVGElement>(".reflink");
       if (link && w * this.view.s <= 12) { this.follow(this.linkTargets[+link.dataset.k!]); return; }
+      const txt = this.corrTextAt(m.target);
+      if (txt) { this.openOne(txt); return; }
       if (this.focus) { this.zoomTo(null); return; }
       const target = this.blockAt(m.target);
       const box = (target && this.boxOf(target)) || this.blockBoxAt(m.x0, m.y0);
@@ -1014,6 +1041,19 @@ class Presenter {
     return [...chain].reverse().find((id) => this.steps.includes(id)) ?? null;
   }
 
+  /** Texte de corrigé déjà révélé sous le clic : le plus petit bloc contenant du texte, dans l'étape. */
+  corrTextAt(t: Element | null): string | null {
+    const chain: string[] = [];
+    for (let el = t; el && el !== this.sheet; el = el.parentElement) {
+      const id = el.getAttribute?.("data-id");
+      if (id) chain.push(id); // du plus profond au plus haut
+    }
+    const k = chain.findIndex((id) => { const i = this.steps.indexOf(id); return i >= 0 && i < this.shown; });
+    if (k < 0) return null;
+    const page = this.page;
+    return page ? chain.slice(0, k + 1).find((id) => hasText(findNode(page, id)?.node)) ?? null : null;
+  }
+
   // ------------------------------------------------------------ interface
 
   setTool(t: Tool) { this.tool = t; this.svg.dataset.tool = t; this.renderBar(); }
@@ -1114,7 +1154,7 @@ class Presenter {
       <span class="vsep"></span>
       ${big("sheets", IC.sheets, "Feuilles")}
       ${big("zoom", IC.zoom, "Zoom", this.focus ? `<i class="dot"></i>` : "")}
-      <button class="big ${this.textMode ? "open" : ""}" data-a="text" title="Corrigé en grand : le texte de l'étape révélée occupe tout l'écran, à la taille la plus lisible (T)">${ic(IC.text)}<span>Texte</span></button>
+      <button class="big ${this.textMode ? "open" : ""}" data-a="text" title="Corrigé en grand : le texte de l'étape révélée occupe tout l'écran, à la taille la plus lisible (T). Astuce : cliquer sur un texte de correction l'affiche seul en grand.">${ic(IC.text)}<span>Texte</span></button>
       <button class="big ${this.tool === "hand" ? "open" : ""}" data-a="hand" title="Main : déplacer la vue (Espace maintenu, bouton du milieu de la souris, ou H)">${ic(IC.hand)}<span>Main</span></button>
       ${big("tool", curTool[1], "Outils", `<i class="dot" style="background:${this.color}"></i>`)}
       ${big("board", IC.board, "Tableau", this.board !== null ? `<i class="dot"></i>` : "")}

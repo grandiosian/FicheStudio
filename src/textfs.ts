@@ -1,7 +1,7 @@
 // Corrigé en plein écran : le texte d'une étape de correction (ou de tout le calque « _Corr »)
 // est remis en page sur tout l'écran, avec le plus grand corps possible, pour être lu de loin.
 import { store } from "./store";
-import { walk, type SceneNode, type TextNode } from "./model";
+import { findNode, walk, type SceneNode, type TextNode } from "./model";
 import { computeNumbering, prepareText, varsFor } from "./templates";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -21,7 +21,9 @@ export function stepsHtml(ids: string[], pageIndex: number): string {
   const numbers = computeNumbering(doc);
   const blocks: string[] = [];
   for (const id of ids) {
-    const node = store.find(id)?.node;
+    // la feuille présentée, pas forcément celle ouverte dans l'éditeur
+    const page = doc.pages[pageIndex];
+    const node = (page ? findNode(page, id) : store.find(id))?.node;
     if (!node) continue;
     const texts: TextNode[] = [];
     walk([node as SceneNode], (n) => { if (n.type === "text" && n.visible !== false) texts.push(n); });

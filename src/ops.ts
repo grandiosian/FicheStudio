@@ -62,6 +62,11 @@ export function copySelection() {
   clipboard = { nodes: nodes.map((n) => structuredClone(n)), cums: nodes.map((n) => store.parentCumulative(n.id)) };
 }
 
+/** Remplit le presse-papiers interne (par exemple un extrait de texte copié pendant l'édition). */
+export function setClipboard(nodes: SceneNode[], cums: Mat[]) {
+  clipboard = { nodes: nodes.map((n) => structuredClone(n)), cums };
+}
+
 export function paste(offset = 30) {
   if (!clipboard) return;
   const layer = store.drawLayer();

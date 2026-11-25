@@ -411,7 +411,8 @@ function buildTopbar() {
   });
   document.addEventListener("view", () => { $("#zoom").textContent = `${Math.round(view.zoom * (store.doc.dpi / 96) * 100)} %`; });
   document.addEventListener("click", (e) => {
-    document.querySelectorAll("details[open]").forEach((d) => { if (!d.contains(e.target as Node)) d.removeAttribute("open"); });
+    // menus déroulants seulement : les sections des panneaux restent comme l'enseignant les a laissées
+    document.querySelectorAll("details.menu[open]").forEach((d) => { if (!d.contains(e.target as Node)) d.removeAttribute("open"); });
   });
   const tabs = () => {
     document.title = `${store.doc.name} — FicheStudio`;

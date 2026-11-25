@@ -5,6 +5,7 @@ import { defaultRun, newParagraph, type Paragraph, type Run, type TextNode } fro
 import { fontMetrics, layoutText, textHeight } from "./textlayout";
 import { prepareText, varsFor } from "./templates";
 import { fmt } from "./geom";
+import { setClipboard } from "./ops";
 
 let editor: HTMLDivElement | null = null;
 let editingId: string | null = null;
@@ -83,15 +84,55 @@ export function openTextEditor(id: string) {
     if (e.key === "Escape") { e.preventDefault(); closeTextEditor(); }
     e.stopPropagation();
   });
+  // extrait copié : ⌘V hors de l'édition en fait un nouveau bloc texte (même style, même mise en page)
+  div.addEventListener("copy", () => copyExcerpt(div, n));
+  div.addEventListener("cut", () => copyExcerpt(div, n));
   div.addEventListener("paste", (e) => {
-    // collage en texte brut pour garder le style courant
     e.preventDefault();
-    document.execCommand("insertText", false, e.clipboardData?.getData("text/plain") ?? "");
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    // extrait copié dans FicheStudio : collé avec son style ; sinon texte brut, au style courant
+    if (styledClip && norm(text) === norm(styledClip.text)) document.execCommand("insertHTML", false, styledClip.html);
+    else document.execCommand("insertText", false, text);
   });
   div.addEventListener("blur", () => setTimeout(() => {
     if (editor === div && !div.contains(document.activeElement) && !document.activeElement?.closest(".keep-editor")) closeTextEditor();
   }, 150));
   document.dispatchEvent(new CustomEvent("textedit"));
+}
+
+/** Dernier extrait copié pendant l'édition : texte (pour le reconnaître au collage) et HTML stylé. */
+let styledClip: { text: string; html: string } | null = null;
+const norm = (s: string) => s.replace(/\r\n?/g, "\n").replace(/\s+/g, " ").trim();
+
+/** Extrait sélectionné → nouveau bloc texte au presse-papiers interne (style des caractères et des paragraphes,
+ *  largeur du cadre, alignement…), et HTML stylé pour un collage dans un autre texte. Le texte brut part comme d'habitude. */
+function copyExcerpt(div: HTMLDivElement, n: TextNode) {
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  if (!div.contains(range.commonAncestorContainer)) return;
+  // l'extrait garde ses ancêtres (paragraphe, fragment stylé) : sans eux, un bout de mot perdrait son style
+  const host = document.createElement("div");
+  let anc: Node | null = range.commonAncestorContainer;
+  if (anc.nodeType === Node.TEXT_NODE) anc = anc.parentNode;
+  const chain: Node[] = [];
+  for (let e = anc; e && e !== div; e = e.parentNode) chain.unshift(e);
+  let inner: Node = host;
+  for (const e of chain) { const c = e.cloneNode(false); inner.appendChild(c); inner = c; }
+  inner.appendChild(range.cloneContents());
+  // collage dans un autre texte : un seul paragraphe → ses fragments seulement
+  const one = host.childNodes.length === 1 && host.firstElementChild && /^(DIV|P)$/.test(host.firstElementChild.tagName) ? host.firstElementChild.innerHTML : null;
+  styledClip = { text: sel.toString(), html: one ?? host.innerHTML };
+  // paragraphe de départ : ses réglages (alignement, retraits, espaces) servent de base
+  let p: Node | null = range.startContainer;
+  while (p && p.parentNode !== div) p = p.parentNode;
+  const start = p ? Array.prototype.indexOf.call(div.childNodes, p) : 0;
+  const base: TextNode = { ...n, paragraphs: n.paragraphs.slice(Math.max(0, start)).length ? n.paragraphs.slice(Math.max(0, start)) : n.paragraphs };
+  const t = structuredClone(n);
+  t.paragraphs = readEditor(host, base);
+  t.name = t.paragraphs.map((q) => q.runs.map((r) => r.text).join("")).join(" ").slice(0, 30) || "Texte";
+  if (t.frame) t.frame.h = Math.ceil(textHeight(prepareText(t, null, store.doc.numbering, varsFor(store.doc, store.pageIndex))));
+  setClipboard([t], [store.parentCumulative(n.id)]);
 }
 
 const toHex = (c: string) => {

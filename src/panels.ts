@@ -229,6 +229,7 @@ function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
     <button data-m="comp">Compétences…${node.comp?.length ? ` <small>${esc(node.comp.join(", "))}</small>` : ""}</button>
     ${node.comp?.length ? `<button data-m="comppills">Poser les pastilles sur la feuille<small>objets imprimés, empilés dans la marge (groupe _Comp)</small></button>` : ""}
     <button data-m="rename">Renommer…</button>
+    <button data-m="dup">${isLayer ? "Dupliquer le calque" : "Dupliquer"}<small>${isLayer ? "copie complète, placée au-dessus" : "copie à la même place, au-dessus"}</small></button>
     <button data-m="eye">${node.visible ? "Masquer" : "Afficher"}</button>
     <button data-m="lock">${node.locked ? "Déverrouiller" : "Verrouiller"}</button>
     ${isLayer ? `<hr><div class="menu-title">Modèle de la charte</div>${TEMPLATES.map((t, i) => `<button data-tpl="${i}">${tpl && (tpl.name === TEMPLATE_PREFIX + t || tpl.name.startsWith(`${TEMPLATE_PREFIX}${t} · `)) ? "✓ " : ""}${t}</button>`).join("")}
@@ -252,6 +253,7 @@ function layerMenu(x: number, y: number, node: SceneNode, isLayer: boolean) {
       if (isLayer) { store.activeLayer = g.id; store.scope = null; }
       store.select(g.children.filter((c) => !c.locked && c.visible).map((c) => c.id));
     } else if (a === "rename") { const name = prompt("Nom", node.name); if (name) store.commit(() => { node.name = name; }); }
+    else if (a === "dup") { if (isLayer && g) duplicateLayer(g); else duplicateInPlace(node); }
     else if (a === "eye") store.commit(() => { node.visible = !node.visible; });
     else if (a === "lock") store.commit(() => { node.locked = !node.locked; });
     else if (a === "untpl" && g) store.commit(() => { g.children = g.children.filter((c) => !c.name.startsWith(TEMPLATE_PREFIX)); });
@@ -283,6 +285,28 @@ document.addEventListener("mouseup", () => { if (toggleDrag) { toggleDrag = null
 const ICON: Record<string, string> = { group: "▣", shape: "◆", path: "✎", text: "T", image: "🖼" };
 const STEP_ICON = `<span class="step-ic" title="Étape de correction">⏵</span>`;
 const expanded = new Set<string>(); // replié par défaut : un document importé compte des milliers d'objets
+
+/** Copie complète d'un calque (nouveaux identifiants), placée juste au-dessus et rendue active. */
+function duplicateLayer(g: GroupNode) {
+  store.commit(() => {
+    const ls = store.page.layers;
+    const c = cloneNode(g);
+    c.name = `${g.name} copie`;
+    ls.splice(ls.indexOf(g) + 1, 0, c);
+    store.activeLayer = c.id;
+    store.selection = [];
+  });
+}
+/** Copie d'un élément de l'arborescence à la même place, juste au-dessus de lui dans son groupe. */
+function duplicateInPlace(n: SceneNode) {
+  const f = store.find(n.id);
+  if (!f) return;
+  store.commit(() => {
+    const c = cloneNode(n);
+    f.parent.children.splice(f.parent.children.indexOf(n) + 1, 0, c);
+    store.selection = [c.id];
+  });
+}
 
 /** Calque ou élément saisi dans l'arborescence (glisser-déposer). */
 let treeDrag: { ids: string[]; layer: boolean } | null = null;
@@ -412,6 +436,7 @@ function refreshLayers() {
   el.innerHTML = `
     <div class="panel-head"><h3>Calques</h3>
       <button data-a="new" title="Nouveau calque">＋</button>
+      <button data-a="duplayer" title="Dupliquer le calque actif (copie complète, placée au-dessus)">⧉</button>
       <button data-a="up" title="Monter">▲</button>
       <button data-a="down" title="Descendre">▼</button>
       <button data-a="dellayer" title="Supprimer le calque actif">🗑</button></div>
@@ -504,6 +529,7 @@ function refreshLayers() {
     store.page.layers.splice(L() + 1, 0, l);
     store.activeLayer = l.id;
   });
+  el.querySelector<HTMLElement>('[data-a="duplayer"]')!.onclick = () => duplicateLayer(store.layer());
   el.querySelector<HTMLElement>('[data-a="up"]')!.onclick = () => store.selection.length ? arrange("up") : store.commit(() => {
     const i = L(), ls = store.page.layers;
     if (i < ls.length - 1) [ls[i], ls[i + 1]] = [ls[i + 1], ls[i]];
